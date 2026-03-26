@@ -1,0 +1,7 @@
+__pycache__
+.vscode
+.vscode/settings.json
+.env
+data
+logs
+models
