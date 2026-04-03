@@ -1,6 +1,6 @@
-# LLM application development environment
+# ASL application development environment
 
-A ready-to-use LLM application development environment for VS Code. Includes **LangChain**, **LlamaIndex**, **Hugging Face Transformers**, **vLLM** (GPU only), and API clients for OpenAI and Anthropic. Available in both GPU and CPU-only configurations.
+A ready-to-use ASL application development environment for VS Code. Includes **LangChain**, **LlamaIndex**, **Hugging Face Transformers**, **vLLM** (GPU only), and API clients for OpenAI and Anthropic. Available in both GPU and CPU-only configurations.
 
 ## What's included
 
@@ -82,7 +82,7 @@ Check your GPU's compute capability: [NVIDIA CUDA GPUs](https://developer.nvidia
 
 2. **Clone** your fork:
    ```bash
-   git clone https://github.com/<your-username>/llms-devcontainer.git
+   git clone https://github.com/<your-username>/asl-recognition.git
    ```
 
 3. **Open VS Code**
@@ -184,3 +184,8 @@ git merge upstream/main
 | vLLM not available | vLLM requires GPU; use the GPU devcontainer |
 | Module not found | Rebuild container after adding to requirements.txt |
 
+# Dataset Acknowledgements
+@misc{https://www.kaggle.com/grassknoted/aslalphabet_akash nagaraj_2018,
+title={ASL Alphabet},
+url={https://www.kaggle.com/dsv/29550},
+DOI={10.34740/KAGGLE/DSV/29550},
