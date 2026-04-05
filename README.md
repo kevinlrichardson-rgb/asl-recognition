@@ -190,9 +190,6 @@ title={ASL Alphabet},
 url={https://www.kaggle.com/dsv/29550},
 DOI={10.34740/KAGGLE/DSV/29550},
 
-https://data.mendeley.com/datasets/8fmvr9m98w/2
-
-ASL_Dynamic.zip
-SignAlphaSet.zip
-
-The files associated with this dataset are licensed under a Creative Commons Attribution 4.0 International licence.
+Garg, Bindu; Kasar, Manisha; Kashyap, Achyut; Vats, 
+Amber; Sharma, Gunjan; Hange, Aditya (2025), “SignAlphaSet”, 
+Mendeley Data, V2, doi: 10.17632/8fmvr9m98w.2
