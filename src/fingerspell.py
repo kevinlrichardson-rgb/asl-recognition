@@ -20,7 +20,7 @@ Usage:
     python src/fingerspell.py --video clip.mp4 --headless
 
     # Save annotated video with HUD overlay to a file
-    python src/fingerspell.py --video clip.mp4 --output output.mp4
+    python src/fingerspell.py --video /data/asl_alphabet_videos/A_clip10.avi --output /data/asi_alphabet_Processed_Folder/output.mp4
 
 Controls (GUI mode, while the window is open):
     q / ESC   – quit
@@ -45,6 +45,7 @@ from mediapipe.tasks.python.vision import (
 import numpy as np
 import torch
 import torch.nn as nn
+from spellchecker import SpellChecker
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -174,34 +175,46 @@ class LetterSmoother:
 # ---------------------------------------------------------------------------
 # Drawing helpers
 # ---------------------------------------------------------------------------
-def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter):
+def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter,
+             suggested_word=None):
     """Overlay information on the video frame."""
     h, w = frame.shape[:2]
 
-    # Semi-transparent bar at the bottom
+    # Semi-transparent bar at the bottom (taller to fit suggestion row)
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, h - 120), (w, h), (40, 40, 40), -1)
+    cv2.rectangle(overlay, (0, h - 150), (w, h), (40, 40, 40), -1)
     cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
     # Current raw prediction
     raw_text = f"Raw: {current_letter or '---'}  ({confidence * 100:.0f}%)"
-    cv2.putText(frame, raw_text, (15, h - 85),
+    cv2.putText(frame, raw_text, (15, h - 115),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
 
     # Smoothed (accepted) letter
     smooth_text = f"Accepted: {smoothed_letter or '---'}"
-    cv2.putText(frame, smooth_text, (15, h - 55),
+    cv2.putText(frame, smooth_text, (15, h - 82),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 150), 2)
 
-    # Word buffer
-    word_text = f"Word: {''.join(word_buffer)}_"
-    cv2.putText(frame, word_text, (15, h - 20),
+    # Word buffer (spelled letters)
+    word_text = f"Spelled: {''.join(word_buffer)}_"
+    cv2.putText(frame, word_text, (15, h - 48),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
 
-    # Big letter in the top-right corner
+    # Suggested word
+    if suggested_word:
+        sugg_text = f"Word: {suggested_word}"
+        cv2.putText(frame, sugg_text, (15, h - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 255), 2)
+
+    # Big letter – top center
     if current_letter:
-        cv2.putText(frame, current_letter, (w - 80, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 0), 4)
+        font_scale = 4.0
+        thickness = 6
+        (tw, th), _ = cv2.getTextSize(current_letter, cv2.FONT_HERSHEY_SIMPLEX,
+                                       font_scale, thickness)
+        cx = (w - tw) // 2
+        cv2.putText(frame, current_letter, (cx, th + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
 
     # Instructions
     cv2.putText(frame, "q:quit  c:clear  bksp:del", (15, 25),
@@ -249,11 +262,27 @@ def _process_frame(frame, detector, model, classes, device, smoother,
             if word_buffer and word_buffer[-1] != " ":
                 word_buffer.append(" ")
                 print(f"  [SPACE]  →  {''.join(word_buffer).strip()}")
-        else:
+        elif not word_buffer or word_buffer[-1] != accepted:
+            # Deduplicate: only append if different from the last letter
             word_buffer.append(accepted)
             print(f"  + {accepted}  →  {''.join(word_buffer)}")
+        else:
+            # Same letter repeated consecutively – skip
+            accepted = None
 
     return current_letter, confidence, accepted
+
+
+def _suggest_word(spell: SpellChecker, word_buffer: list[str]) -> str | None:
+    """Return the best English-word suggestion for the current letter sequence."""
+    raw = "".join(word_buffer).strip().lower()
+    if not raw:
+        return None
+    # If it's already a known word, return it capitalised as typed
+    if not spell.unknown([raw]):
+        return raw.upper()
+    correction = spell.correction(raw)
+    return correction.upper() if correction else raw.upper()
 
 
 def run(source, model, classes, detector, device, headless=False,
@@ -281,6 +310,8 @@ def run(source, model, classes, detector, device, headless=False,
 
     smoother = LetterSmoother()
     word_buffer: list[str] = []
+    spell = SpellChecker()
+    current_suggestion: str | None = None
 
     frame_idx = 0
     mode_label = "headless" if headless else "GUI"
@@ -306,9 +337,16 @@ def run(source, model, classes, detector, device, headless=False,
             word_buffer, timestamp_ms,
         )
 
+        # Update word suggestion whenever the buffer changes
+        if accepted is not None:
+            current_suggestion = _suggest_word(spell, word_buffer)
+            if current_suggestion:
+                print(f"  >> Suggested word: {current_suggestion}")
+
         # Draw HUD if we need to display or save
         if not headless or writer:
-            draw_hud(frame, current_letter, confidence, word_buffer, accepted)
+            draw_hud(frame, current_letter, confidence, word_buffer, accepted,
+                     suggested_word=current_suggestion)
 
         # Write annotated frame to output file
         if writer:
@@ -325,6 +363,7 @@ def run(source, model, classes, detector, device, headless=False,
                 print(f"  [BACKSPACE] removed '{removed}'  →  {''.join(word_buffer)}")
             elif key == ord("c"):
                 word_buffer.clear()
+                current_suggestion = None
                 print("  [CLEAR]")
 
         # Progress indicator for headless video mode
@@ -342,8 +381,13 @@ def run(source, model, classes, detector, device, headless=False,
         cv2.destroyAllWindows()
 
     final_word = "".join(word_buffer).strip()
+    final_suggestion = _suggest_word(spell, word_buffer) if final_word else None
     print(f"\n=== Session ended ({frame_idx} frames processed) ===")
-    print(f"Spelled word: {final_word if final_word else '(empty)'}")
+    print(f"Spelled letters: {final_word if final_word else '(empty)'}")
+    if final_suggestion and final_suggestion != final_word.upper():
+        print(f"Recognised word:  {final_suggestion}")
+    elif final_suggestion:
+        print(f"Recognised word:  {final_suggestion}")
     return final_word
 
 
