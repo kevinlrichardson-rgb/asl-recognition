@@ -23,9 +23,9 @@ Usage:
     python src/fingerspell.py --video /data/asl_alphabet_videos/A_clip10.avi --output /data/asi_alphabet_Processed_Folder/output.mp4
 
 Controls (GUI mode, while the window is open):
-    q / ESC   – quit
-    BACKSPACE – delete last character
-    c         – clear the current word buffer
+    q / ESC   quit
+    BACKSPACE delete last character
+    c         clear the current word buffer
 """
 
 import argparse
@@ -47,9 +47,9 @@ import torch
 import torch.nn as nn
 from spellchecker import SpellChecker
 
-# ---------------------------------------------------------------------------
+
 # Paths
-# ---------------------------------------------------------------------------
+
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
 MODEL_PATH = os.path.join(BASE_DIR, "models", "asl_model.pt")
 CLASSES_PATH = os.path.join(BASE_DIR, "models", "label_classes.npy")
@@ -58,18 +58,18 @@ LANDMARK_MODEL = os.path.join(BASE_DIR, "models", "hand_landmarker.task")
 NUM_LANDMARKS = 21
 COORDS_PER_LM = 3
 
-# ---------------------------------------------------------------------------
+
 # Smoothing / stabilisation parameters
-# ---------------------------------------------------------------------------
+
 WINDOW_SIZE = 15          # frames for majority-vote smoothing
 STABLE_COUNT = 10         # consecutive identical smoothed predictions to accept
 COOLDOWN_FRAMES = 8       # minimum frames after accepting a letter before next
 CONFIDENCE_THRESHOLD = 0.55  # ignore predictions below this confidence
 
 
-# ---------------------------------------------------------------------------
+
 # Model definition (must match train.ipynb / demo.py)
-# ---------------------------------------------------------------------------
+
 class ASLClassifier(nn.Module):
     def __init__(self, input_dim: int, num_classes: int):
         super().__init__()
@@ -84,9 +84,9 @@ class ASLClassifier(nn.Module):
         return self.net(x)
 
 
-# ---------------------------------------------------------------------------
+
 # Landmark helpers (mirror of extract_landmarks / demo.py)
-# ---------------------------------------------------------------------------
+
 def normalise_landmarks(landmarks_list):
     pts = np.array(landmarks_list, dtype=np.float32).reshape(NUM_LANDMARKS, COORDS_PER_LM)
     pts -= pts[0]
@@ -96,16 +96,44 @@ def normalise_landmarks(landmarks_list):
     return pts.flatten()
 
 
+# MediaPipe hand connections (pairs of landmark indices)
+_HAND_CONNECTIONS = [
+    (0,1),(1,2),(2,3),(3,4),          # thumb
+    (0,5),(5,6),(6,7),(7,8),          # index
+    (0,9),(9,10),(10,11),(11,12),     # middle
+    (0,13),(13,14),(14,15),(15,16),   # ring
+    (0,17),(17,18),(18,19),(19,20),   # pinky
+    (5,9),(9,13),(13,17),             # palm
+]
+
+
 def extract_features_from_frame(img_rgb_np, detector, timestamp_ms):
-    """Extract normalised landmark vector using VIDEO running mode."""
+    """Extract normalised landmark vector using VIDEO running mode.
+    Returns (feature_vector, landmark_list) or (None, None) if no hand found."""
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb_np)
     result = detector.detect_for_video(mp_image, timestamp_ms)
     if not result.hand_landmarks:
-        return None
+        return None, None
     raw = []
     for lm in result.hand_landmarks[0]:
         raw.extend([lm.x, lm.y, lm.z])
-    return normalise_landmarks(raw)
+    return normalise_landmarks(raw), result.hand_landmarks[0]
+
+
+def draw_landmarks(frame, landmarks):
+    """Draw hand landmark dots and connections onto *frame* (BGR, in-place)."""
+    if not landmarks:
+        return
+    h, w = frame.shape[:2]
+    pts = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
+    # Connections
+    for a, b in _HAND_CONNECTIONS:
+        cv2.line(frame, pts[a], pts[b], (255, 255, 0), 2, cv2.LINE_AA)
+    # Dots
+    for i, pt in enumerate(pts):
+        color = (0, 0, 255) if i == 0 else (0, 255, 255)  # wrist red, rest cyan
+        cv2.circle(frame, pt, 5, color, -1, cv2.LINE_AA)
+        cv2.circle(frame, pt, 5, (0, 0, 0), 1, cv2.LINE_AA)  # thin black outline
 
 
 def predict_frame(features, model, classes, device):
@@ -118,9 +146,9 @@ def predict_frame(features, model, classes, device):
     return classes[pred_idx], float(probs[pred_idx])
 
 
-# ---------------------------------------------------------------------------
+
 # Temporal smoothing helper
-# ---------------------------------------------------------------------------
+
 class LetterSmoother:
     """Majority-vote smoothing + stability gate to reduce jitter."""
 
@@ -172,9 +200,9 @@ class LetterSmoother:
         return None
 
 
-# ---------------------------------------------------------------------------
+
 # Drawing helpers
-# ---------------------------------------------------------------------------
+
 def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter,
              suggested_word=None):
     """Overlay information on the video frame."""
@@ -221,9 +249,9 @@ def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter,
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
 
 
-# ---------------------------------------------------------------------------
+
 # Display capability detection
-# ---------------------------------------------------------------------------
+
 def _has_display() -> bool:
     """Return True if a GUI display is likely available."""
     if sys.platform == "win32":
@@ -231,16 +259,16 @@ def _has_display() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
-# ---------------------------------------------------------------------------
+
 # Main processing loop
-# ---------------------------------------------------------------------------
+
 def _process_frame(frame, detector, model, classes, device, smoother,
                    word_buffer, timestamp_ms):
     """Run detection + prediction + smoothing on one frame.
     Returns (current_letter, confidence, accepted_letter)."""
     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    features = extract_features_from_frame(img_rgb, detector, timestamp_ms)
+    features, landmarks = extract_features_from_frame(img_rgb, detector, timestamp_ms)
     current_letter = None
     confidence = 0.0
 
@@ -248,6 +276,10 @@ def _process_frame(frame, detector, model, classes, device, smoother,
         current_letter, confidence = predict_frame(features, model, classes, device)
         if confidence < CONFIDENCE_THRESHOLD:
             current_letter = None
+
+    # Draw hand landmarks on the frame before the HUD
+    if landmarks:
+        draw_landmarks(frame, landmarks)
 
     # Handle special classes
     if current_letter in ("del", "nothing"):
@@ -391,9 +423,9 @@ def run(source, model, classes, detector, device, headless=False,
     return final_word
 
 
-# ---------------------------------------------------------------------------
+
 # Entry point
-# ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser(
         description="ASL Fingerspelling Word Recognition (Phase 2)",
