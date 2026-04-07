@@ -244,6 +244,7 @@ def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter,
         cv2.putText(frame, current_letter, (cx, th + 20),
                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
 
+   
     # Instructions
     cv2.putText(frame, "q:quit  c:clear  bksp:del", (15, 25),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
