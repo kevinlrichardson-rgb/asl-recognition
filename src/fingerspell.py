@@ -36,6 +36,13 @@ import time
 
 import cv2
 import mediapipe as mp
+
+# Word-sign recogniser (gracefully absent before model is trained)
+try:
+    from wlasl_infer import WordSignRecogniser
+    _WLASL_AVAILABLE = True
+except ImportError:
+    _WLASL_AVAILABLE = False
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python.vision import (
     HandLandmarker,
@@ -204,7 +211,7 @@ class LetterSmoother:
 # Drawing helpers
 
 def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter,
-             suggested_word=None):
+             suggested_word=None, sign_word=None, sign_conf=0.0):
     """Overlay information on the video frame."""
     h, w = frame.shape[:2]
 
@@ -233,6 +240,12 @@ def draw_hud(frame, current_letter, confidence, word_buffer, smoothed_letter,
         sugg_text = f"Word: {suggested_word}"
         cv2.putText(frame, sugg_text, (15, h - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 255), 2)
+
+    # Word-sign prediction (top-left, below instructions)
+    if sign_word:
+        sign_text = f"Sign: {sign_word}  ({sign_conf * 100:.0f}%)"
+        cv2.putText(frame, sign_text, (15, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 165, 0), 2)
 
     # Big letter – top center
     if current_letter:
@@ -346,6 +359,17 @@ def run(source, model, classes, detector, device, headless=False,
     spell = SpellChecker()
     current_suggestion: str | None = None
 
+    # Word-sign recogniser (optional — only active after wlasl_train.py is run)
+    sign_recogniser = None
+    if _WLASL_AVAILABLE:
+        sign_recogniser = WordSignRecogniser()
+        if sign_recogniser.is_ready():
+            print("Word-sign recogniser loaded (WLASL model).")
+        else:
+            sign_recogniser = None
+    current_sign_word: str | None = None
+    current_sign_conf: float = 0.0
+
     frame_idx = 0
     mode_label = "headless" if headless else "GUI"
     if output_path:
@@ -370,6 +394,14 @@ def run(source, model, classes, detector, device, headless=False,
             word_buffer, timestamp_ms,
         )
 
+        # Word-sign recogniser (runs on every frame; uses its own stride internally)
+        if sign_recogniser:
+            sign_word, sign_conf = sign_recogniser.update(frame, timestamp_ms)
+            if sign_word and sign_word != current_sign_word:
+                current_sign_word = sign_word
+                current_sign_conf = sign_conf
+                print(f"  [SIGN] {sign_word}  ({sign_conf * 100:.0f}%)")
+
         # Update word suggestion whenever the buffer changes
         if accepted is not None:
             current_suggestion = _suggest_word(spell, word_buffer)
@@ -379,7 +411,8 @@ def run(source, model, classes, detector, device, headless=False,
         # Draw HUD if we need to display or save
         if not headless or writer:
             draw_hud(frame, current_letter, confidence, word_buffer, accepted,
-                     suggested_word=current_suggestion)
+                     suggested_word=current_suggestion,
+                     sign_word=current_sign_word, sign_conf=current_sign_conf)
 
         # Write annotated frame to output file
         if writer:
@@ -407,6 +440,8 @@ def run(source, model, classes, detector, device, headless=False,
         frame_idx += 1
 
     cap.release()
+    if sign_recogniser:
+        sign_recogniser.close()
     if writer:
         writer.release()
         print(f"\nAnnotated video saved to: {os.path.abspath(output_path)}")
