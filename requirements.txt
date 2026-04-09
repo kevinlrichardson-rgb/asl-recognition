@@ -6,3 +6,4 @@ scikit-learn
 seaborn
 opencv-python-headless
 mediapipe
+yt-dlp
