@@ -1,20 +1,25 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	// Container definition LLM application development environment
-	"name": "LLM devcontainer GPU",
-	"image": "gperdrizet/llms-gpu",
+	// Container definition for Jetson Orin Nano GPU development
+	"name": "Jetson Orin Nano GPU devcontainer",
+	"image": "nvcr.io/nvidia/l4t-jetpack:r36.3",
+	"platform": "linux/arm64",
     "runArgs": [
 		"--gpus", "all",              // Enable all available GPUs in the container
 		"--pid=host",                 // Use host PIDs, needed for nvidia-smi process list
 		"--ipc=host",                 // Connect to host interprocess namespace
-		"--ulimit", "memlock=-1",     // Turn of memory lock limit
+		"--ulimit", "memlock=-1",     // Turn off memory lock limit
 		"--ulimit", "stack=67108864", // Increase process stack limit to 64 MB
-		"--network=bridge"            // Explicitly use bridge network for internet access
+		"--network=bridge",           // Explicitly use bridge network for internet access
+		"--shm-size=4gb"              // Allocate 4GB shared memory (important for Jetson's limited RAM)
 	],
-	"remoteUser": "vscode",           // Use the 'vscode' user provided by the base image
+	"remoteUser": "root",             // Use root user (Jetson containers use root)
 	"containerEnv": {
-		"TF_CPP_MIN_LOG_LEVEL": "1"   // Suppress TensorFlow INFO logs for cleaner output
+		"TF_CPP_MIN_LOG_LEVEL": "1",  // Suppress TensorFlow INFO logs for cleaner output
+		"CUDA_HOME": "/usr/local/cuda",
+		"LD_LIBRARY_PATH": "/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu",
+		"PATH": "/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   	},
 
 	// Custom configuration options
@@ -58,10 +63,10 @@
 
 	// Use 'onCreateCommand' to run commands once when the container is created
 	// This runs only on initial container creation, not on subsequent starts/attaches
-	"onCreateCommand": "",
+	"onCreateCommand": "apt-get update && apt-get install -y python3-pip python3-dev && pip install --upgrade pip setuptools wheel",
 
 	// Use 'postCreateCommand' to run commands once after the container is created
-	"postCreateCommand": "mkdir -p logs && mkdir -p models && mkdir -p data",
+	"postCreateCommand": "mkdir -p logs && mkdir -p models && mkdir -p data && pip install -r requirements.txt",
 
 	// Use 'postAttachCommand' to run TensorBoard
 	"postAttachCommand": ""
