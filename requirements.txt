@@ -1,8 +1,17 @@
-torch
-numpy
-pandas
-matplotlib
-scikit-learn
-seaborn
-opencv-python-headless
-mediapipe
+# PyTorch for Jetson (pre-installed in JetPack, do not pip install)
+# torch==2.1.0  # Use pre-built wheel from JetPack
+
+# Core dependencies with version pins for stability
+numpy==1.26.4
+pandas==2.1.4
+matplotlib==3.8.2
+scikit-learn==1.3.2
+seaborn==0.13.0
+opencv-python-headless==4.8.1.78
+mediapipe==0.10.8
+
+# Additional useful packages for ML on Jetson
+tensorboard==2.14.1
+scipy==1.11.4
+Pillow==10.1.0
+tqdm==4.66.1
