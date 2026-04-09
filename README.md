@@ -190,9 +190,24 @@ title={ASL Alphabet},
 url={https://www.kaggle.com/dsv/29550},
 DOI={10.34740/KAGGLE/DSV/29550},
 
-https://data.mendeley.com/datasets/8fmvr9m98w/2
+Garg, Bindu; Kasar, Manisha; Kashyap, Achyut; Vats, 
+Amber; Sharma, Gunjan; Hange, Aditya (2025), “SignAlphaSet”, 
+Mendeley Data, V2, doi: 10.17632/8fmvr9m98w.2
 
-ASL_Dynamic.zip
-SignAlphaSet.zip
 
-The files associated with this dataset are licensed under a Creative Commons Attribution 4.0 International licence.
+WLASL (World Level American Sign Language) Video
+All the WLASL data is intended for academic and computational use only. No commercial usage is allowed.
+
+Made by Dongxu Li and Hongdong Li. Please read the WLASL paper and visit the official website and repository.
+
+Licensed under the Computational Use of Data Agreement (C-UDA). Please refer to the C-UDA-1.0 page for more information.
+
+Subjects:	Computer Vision and Pattern Recognition (cs.CV); Computation and Language (cs.CL)
+Cite as:	arXiv:2304.05934 [cs.CV]
+ 	(or arXiv:2304.05934v2 [cs.CV] for this version) 
+https://doi.org/10.48550/arXiv.2304.05934
+
+
+Inspiration
+How to classify word-level action recognition to text?
+What is the most accurate model to do word-level sign language recognition?
