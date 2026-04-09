@@ -27,9 +27,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# ---------------------------------------------------------------------------
+
 # Paths
-# ---------------------------------------------------------------------------
+
 BASE_DIR     = os.path.join(os.path.dirname(__file__), "..")
 MODEL_PATH      = os.path.join(BASE_DIR, "models", "asl_model.pt")
 CLASSES_PATH    = os.path.join(BASE_DIR, "models", "label_classes.npy")
@@ -40,9 +40,9 @@ NUM_LANDMARKS    = 21
 COORDS_PER_LM    = 3
 
 
-# ---------------------------------------------------------------------------
+
 # Model definition (must match train.py)
-# ---------------------------------------------------------------------------
+
 class ASLClassifier(nn.Module):
     def __init__(self, input_dim: int, num_classes: int):
         super().__init__()
@@ -56,9 +56,9 @@ class ASLClassifier(nn.Module):
         return self.net(x)
 
 
-# ---------------------------------------------------------------------------
+
 # Landmark helpers (mirror of extract_landmarks.py)
-# ---------------------------------------------------------------------------
+
 def normalise_landmarks(landmarks_list):
     pts = np.array(landmarks_list, dtype=np.float32).reshape(NUM_LANDMARKS, COORDS_PER_LM)
     pts -= pts[0]
@@ -81,9 +81,9 @@ def extract_features(img_bgr, detector):
     return normalise_landmarks(raw)
 
 
-# ---------------------------------------------------------------------------
+
 # Prediction
-# ---------------------------------------------------------------------------
+
 def _try_extract(img_bgr, detector):
     """Try multiple orientation-preserving pre-processing strategies to find a hand.
 
@@ -159,9 +159,9 @@ def predict_image(img_path: str, model, classes, detector, device) -> tuple[str 
     return classes[pred_idx], confidence
 
 
-# ---------------------------------------------------------------------------
+
 # Main
-# ---------------------------------------------------------------------------
+
 def main():
     # -- Load model --
     for path, label in [(MODEL_PATH, "model"), (CLASSES_PATH, "classes")]:
