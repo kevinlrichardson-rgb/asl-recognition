@@ -44,19 +44,18 @@ SEED      = 42
 # ── Dataset ───────────────────────────────────────────────────────────────────
 
 class WLASLDataset(Dataset):
-    def __init__(self, sequences: np.ndarray, labels: np.ndarray,
-                 lengths: np.ndarray, augment: bool = False):
-        self.sequences = torch.from_numpy(sequences)   # (N, T, F)
-        self.labels    = torch.from_numpy(labels).long()
-        self.lengths   = torch.from_numpy(lengths).long()
-        self.augment   = augment
+    def __init__(self, paths: list, labels: list, augment: bool = False):
+        self.paths   = paths
+        self.labels  = torch.tensor(labels, dtype=torch.long)
+        self.augment = augment
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        seq = self.sequences[idx].clone()
-        length = self.lengths[idx].item()
+        d = np.load(self.paths[idx])
+        seq = torch.from_numpy(d["features"].astype(np.float32))
+        length = int(d["original_length"])
         if self.augment:
             T = seq.size(0)
 
@@ -149,7 +148,6 @@ class WLASLModel(nn.Module):
 
 def load_dataset(data_dirs: list[Path], min_samples: int) -> tuple:
     """Scan one or more landmark dirs, merge classes, filter by min_samples."""
-    # Count instances per gloss across all dirs
     counts: dict[str, int] = {}
     for data_dir in data_dirs:
         if not data_dir.exists():
@@ -171,24 +169,18 @@ def load_dataset(data_dirs: list[Path], min_samples: int) -> tuple:
     print(f"Classes (>={min_samples} samples): {len(classes)}")
     print(f"  Range: {classes[0]} … {classes[-1]}")
 
-    sequences, labels, lengths = [], [], []
+    paths, labels = [], []
     for gloss in classes:
         for data_dir in data_dirs:
             gd = data_dir / gloss
             if not gd.exists():
                 continue
             for npz_path in sorted(gd.glob("*.npz")):
-                d = np.load(npz_path)
-                sequences.append(d["features"])
+                paths.append(npz_path)
                 labels.append(class_to_idx[gloss])
-                lengths.append(int(d["original_length"]))
 
-    seqs = np.stack(sequences).astype(np.float32)   # (N, T, F)
-    lbls = np.array(labels, dtype=np.int64)
-    lens = np.array(lengths, dtype=np.int64)
-    print(f"Total instances: {len(lbls)}  "
-          f"| Sequence shape: {seqs.shape}  | Feature dim: {seqs.shape[2]}")
-    return seqs, lbls, lens, np.array(classes)
+    print(f"Total instances: {len(labels)}")
+    return paths, labels, np.array(classes)
 
 
 # ── Training loop ─────────────────────────────────────────────────────────────
@@ -249,19 +241,23 @@ def main():
     # ── Load data
     data_dirs = [ROOT / p.strip() if not Path(p.strip()).is_absolute()
                  else Path(p.strip()) for p in args.data_dirs.split(",")]
-    seqs, lbls, lens, classes = load_dataset(data_dirs, args.min_samples)
+    paths, labels, classes = load_dataset(data_dirs, args.min_samples)
     num_classes = len(classes)
-    feat_dim = seqs.shape[2]
 
-    n = len(lbls)
+    # Infer feat_dim and seq_len from one sample file
+    _sample = np.load(paths[0])
+    seq_len, feat_dim = _sample["features"].shape
+    print(f"Sequence shape: ({seq_len}, {feat_dim})  | Feature dim: {feat_dim}\n")
+
+    n = len(labels)
     n_val  = max(1, int(n * VAL_FRAC))
     n_test = max(1, int(n * TEST_FRAC))
     n_train = n - n_val - n_test
 
     rng = torch.Generator().manual_seed(SEED)
-    full_ds = WLASLDataset(seqs, lbls, lens, augment=False)
+    full_ds = WLASLDataset(paths, labels, augment=False)
     train_ds, val_ds, test_ds = random_split(full_ds, [n_train, n_val, n_test], generator=rng)
-    train_ds.dataset = WLASLDataset(seqs, lbls, lens, augment=True)
+    train_ds.dataset = WLASLDataset(paths, labels, augment=True)
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                               num_workers=2, pin_memory=device.type == "cuda")
@@ -317,7 +313,7 @@ def main():
                 "hidden": args.hidden,
                 "num_layers": args.layers,
                 "dropout": args.dropout,
-                "seq_len": seqs.shape[1],
+                "seq_len": seq_len,
                 "val_acc": vl_acc,
             }, MODEL_OUT)
             np.save(CLASS_OUT, classes)
