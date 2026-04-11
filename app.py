@@ -59,7 +59,7 @@ NUM_LANDMARKS, COORDS_PER_LM = 21, 3
 WINDOW_SIZE = 15
 STABLE_COUNT = 10
 COOLDOWN_FRAMES = 8
-FS_CONFIDENCE_THRESHOLD = 0.55
+FS_CONFIDENCE_THRESHOLD = 0.50
 WS_STRIDE = 8
 
 _HAND_CONNECTIONS = [
@@ -460,7 +460,7 @@ def process_wordsign(frame, state, audio_on):
     recent_words = state["recent_words"]
     last_word = state["last_word"]
     last_conf = state["last_conf"]
-    conf_thresh = state.get("conf_thresh", 0.4)
+    conf_thresh = state.get("conf_thresh", 0.5)
 
     # Gradio sends RGB frames; copy so we can draw on it
     frame = frame.copy()
