@@ -9,7 +9,6 @@ Runs on Hugging Face Spaces or locally with: python app.py
 """
 
 import os
-import tempfile
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -20,7 +19,6 @@ import mediapipe as mp_lib
 import numpy as np
 import torch
 import torch.nn as nn
-from gtts import gTTS
 from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import (
     HandLandmarker, HandLandmarkerOptions,
@@ -365,34 +363,6 @@ ws_assets = load_wordsign()
 spell     = SpellChecker()
 
 
-# ── Audio helpers ──────────────────────────────────────────────────────────────
-
-_AUDIO_DIR = Path(tempfile.gettempdir()) / "asl_audio"
-_AUDIO_DIR.mkdir(exist_ok=True)
-_audio_cache: dict[str, str] = {}
-
-
-def _get_audio_path(text: str) -> str | None:
-    key = text.strip().lower()
-    if key in _audio_cache:
-        return _audio_cache[key]
-    try:
-        path = str(_AUDIO_DIR / f"{key}.mp3")
-        if not Path(path).exists():
-            gTTS(text=key, lang="en", slow=False).save(path)
-        _audio_cache[key] = path
-        return path
-    except Exception:
-        return None
-
-
-def _pregen_letters():
-    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-        _get_audio_path(letter)
-
-_pregen_letters()
-
-
 # ── Fingerspell processing ─────────────────────────────────────────────────────
 
 def _suggest_word(word_buffer: list[str]) -> str:
@@ -407,7 +377,7 @@ def _suggest_word(word_buffer: list[str]) -> str:
 
 def process_fingerspell(frame, state, audio_on):
     if frame is None or fs_assets is None:
-        return _fs_caption_html(None, 0.0, [], ""), state, None
+        return _fs_caption_html(None, 0.0, [], ""), state, ""
 
     model, classes, device, detector = fs_assets
     smoother    = state["smoother"]
@@ -450,29 +420,29 @@ def process_fingerspell(frame, state, audio_on):
         elif not word_buffer or word_buffer[-1] != accepted:
             word_buffer.append(accepted)
 
-    audio_path = None
-    if audio_on and accepted and accepted != " ":
-        audio_path = _get_audio_path(accepted)
+    speech = (accepted if audio_on and accepted and accepted != " " else "")
 
     state["smoother"]    = smoother
     state["word_buffer"] = word_buffer
 
     suggestion = _suggest_word(word_buffer)
     caption    = _fs_caption_html(current_letter, confidence, word_buffer, suggestion)
-    return caption, state, audio_path
+    return caption, state, speech
 
 
 def clear_fingerspell(state):
+    # Speak the suggestion before wiping the buffer
+    suggestion = _suggest_word(state["word_buffer"])
     state["word_buffer"] = []
     state["smoother"]    = LetterSmoother()
-    return _fs_caption_html(None, 0.0, [], ""), state
+    return _fs_caption_html(None, 0.0, [], ""), state, suggestion
 
 
 # ── Word-sign processing ───────────────────────────────────────────────────────
 
 def process_wordsign(frame, state, audio_on):
     if frame is None or ws_assets is None:
-        return _ws_caption_html([], None, 0.0, 0, 64), state, None
+        return _ws_caption_html([], None, 0.0, 0, 64), state, ""
 
     model, classes, device, seq_len, pose_det, hand_det = ws_assets
     frame_buf    = state["frame_buf"]
@@ -512,9 +482,7 @@ def process_wordsign(frame, state, audio_on):
             last_word = None
             last_conf = conf
 
-    audio_path = None
-    if audio_on and last_word and last_word != state.get("last_word"):
-        audio_path = _get_audio_path(last_word)
+    speech = (last_word if audio_on and last_word and last_word != state.get("last_word") else "")
 
     state["frame_buf"]    = frame_buf
     state["frame_count"]  = frame_count
@@ -524,17 +492,20 @@ def process_wordsign(frame, state, audio_on):
 
     caption = _ws_caption_html(recent_words, last_word, last_conf,
                                len(frame_buf), seq_len)
-    return caption, state, audio_path
+    return caption, state, speech
 
 
 def clear_wordsign(state):
+    # Speak the last detected word before wiping history
+    recent = state.get("recent_words")
+    speech = state.get("last_word") or (str(list(recent)[-1]) if recent else "")
     seq_len = ws_assets[3] if ws_assets else 64
     state["frame_buf"]    = deque(maxlen=seq_len)
     state["frame_count"]  = 0
     state["recent_words"] = deque(maxlen=10)
     state["last_word"]    = None
     state["last_conf"]    = 0.0
-    return _ws_caption_html([], None, 0.0, 0, seq_len), state
+    return _ws_caption_html([], None, 0.0, 0, seq_len), state, speech
 
 
 # ── Gradio state factories ─────────────────────────────────────────────────────
@@ -576,18 +547,32 @@ with gr.Blocks(title="ASL Recognition") as demo:
             with gr.Row():
                 fs_clear_btn    = gr.Button("Clear")
                 fs_audio_toggle = gr.Checkbox(label="Audio", value=True)
-            fs_audio_out = gr.Audio(autoplay=True, visible=False, label="Audio")
+            # Hidden textbox carries the speech cue to the browser JS handler
+            fs_speech_cue = gr.Textbox(visible=False, value="")
 
             fs_webcam.stream(
                 fn=process_fingerspell,
                 inputs=[fs_webcam, fs_state, fs_audio_toggle],
-                outputs=[fs_caption, fs_state, fs_audio_out],
+                outputs=[fs_caption, fs_state, fs_speech_cue],
                 stream_every=0.1,
+            )
+            # Pure JS handler: cancel any queued speech, then speak the new cue.
+            # speechSynthesis.cancel() clears the browser's speech queue, so
+            # stale events that arrive in a burst (tab switch, etc.) don't pile up.
+            fs_speech_cue.change(
+                fn=None,
+                inputs=[fs_speech_cue],
+                outputs=[],
+                js="""(text) => {
+                    if (!text || !text.trim() || !window.speechSynthesis) return;
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text.trim()));
+                }""",
             )
             fs_clear_btn.click(
                 fn=clear_fingerspell,
                 inputs=[fs_state],
-                outputs=[fs_caption, fs_state],
+                outputs=[fs_caption, fs_state, fs_speech_cue],
             )
 
         # ── Word Sign Tab ──────────────────────────────────────────────────────
@@ -612,18 +597,28 @@ with gr.Blocks(title="ASL Recognition") as demo:
             with gr.Row():
                 ws_clear_btn    = gr.Button("Clear")
                 ws_audio_toggle = gr.Checkbox(label="Audio", value=True)
-            ws_audio_out = gr.Audio(autoplay=True, visible=False, label="Audio")
+            ws_speech_cue = gr.Textbox(visible=False, value="")
 
             ws_webcam.stream(
                 fn=process_wordsign,
                 inputs=[ws_webcam, ws_state, ws_audio_toggle],
-                outputs=[ws_caption, ws_state, ws_audio_out],
+                outputs=[ws_caption, ws_state, ws_speech_cue],
                 stream_every=0.1,
+            )
+            ws_speech_cue.change(
+                fn=None,
+                inputs=[ws_speech_cue],
+                outputs=[],
+                js="""(text) => {
+                    if (!text || !text.trim() || !window.speechSynthesis) return;
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text.trim()));
+                }""",
             )
             ws_clear_btn.click(
                 fn=clear_wordsign,
                 inputs=[ws_state],
-                outputs=[ws_caption, ws_state],
+                outputs=[ws_caption, ws_state, ws_speech_cue],
             )
 
 if __name__ == "__main__":
