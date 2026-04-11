@@ -1,23 +1,6 @@
-# PyTorch for Jetson — versions 2.9+ fail with CUBLAS_STATUS_ALLOC_FAILED on CUDA 12.6
-# Install in this order:
-#   pip3 install torch==2.8.0 --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
-#   pip3 install nvidia-cudss-cu12                    # provides libcudss.so.0
-#   pip3 install "nvidia-cublas-cu12==12.6.4.1"       # downgrade cublas to match CUDA 12.6
-# Also add to ~/.bashrc:
-#   export LD_LIBRARY_PATH="$HOME/.local/lib/python3.10/site-packages/nvidia/cu12/lib:$LD_LIBRARY_PATH"
-
-# Core dependencies with version pins for stability
-numpy==1.26.4
-pandas==2.1.4
-matplotlib==3.8.2
-scikit-learn==1.3.2
-seaborn==0.13.0
-opencv-python-headless==4.8.1.78
-mediapipe==0.10.8
-
-# Additional useful packages for ML on Jetson
-tensorboard==2.14.1
-scipy==1.11.4
-Pillow==10.1.0
-tqdm==4.66.1
-pyspellchecker==0.9.0
+gradio>=5.0
+torch
+opencv-python-headless
+mediapipe>=0.10.8
+numpy>=1.26
+pyspellchecker

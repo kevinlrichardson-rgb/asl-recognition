@@ -1,3 +1,13 @@
+---
+title: ASL Recognition
+emoji: "\U0001F44B"
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: "5.0"
+app_file: app.py
+---
+
 # ASL application development environment
 
 A ready-to-use ASL application development environment for VS Code. Includes **LangChain**, **LlamaIndex**, **Hugging Face Transformers**, **vLLM** (GPU only), and API clients for OpenAI and Anthropic. Available in both GPU and CPU-only configurations.
