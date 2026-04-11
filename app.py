@@ -334,9 +334,9 @@ def process_fingerspell(frame, state):
     smoother = state["smoother"]
     word_buffer = state["word_buffer"]
 
-    # Convert to RGB for MediaPipe
-    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=img_rgb)
+    # Gradio sends RGB frames; copy so we can draw on it
+    frame = frame.copy()
+    mp_image = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=frame)
     result = detector.detect(mp_image)
 
     current_letter = None
@@ -427,9 +427,9 @@ def process_wordsign(frame, state):
     last_conf = state["last_conf"]
     conf_thresh = state.get("conf_thresh", 0.4)
 
-    # Run MediaPipe
-    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=img_rgb)
+    # Gradio sends RGB frames; copy so we can draw on it
+    frame = frame.copy()
+    mp_image = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=frame)
     pose_result = pose_det.detect(mp_image)
     hand_result = hand_det.detect(mp_image)
 
