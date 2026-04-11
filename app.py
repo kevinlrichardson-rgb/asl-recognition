@@ -210,13 +210,14 @@ _CAPTION_BASE = (
 
 
 def _fs_caption_html(current_letter: str | None, confidence: float,
-                     word_buffer: list, suggestion: str) -> str:
+                     word_buffer: list, suggestion: str, speech: str = "") -> str:
     spelled = "".join(word_buffer)
     letter_html = (current_letter or "").strip() or "&nbsp;"
     conf_html   = f"{confidence*100:.0f}%" if (current_letter or "").strip() else ""
     sugg_html   = f"Suggestion:&nbsp;<b>{suggestion}</b>" if suggestion else "&nbsp;"
     return (
-        f'<div style="{_CAPTION_BASE}font-family:\'Courier New\',monospace;">'
+        f'<div style="{_CAPTION_BASE}font-family:\'Courier New\',monospace;"'
+        f' data-speech="{speech}">'
         f'<div style="color:#fff;font-size:80px;font-weight:bold;line-height:1;'
         f'min-height:88px;text-align:center;">{letter_html}</div>'
         f'<div style="color:#888;font-size:15px;min-height:20px;">{conf_html}</div>'
@@ -228,7 +229,7 @@ def _fs_caption_html(current_letter: str | None, confidence: float,
 
 
 def _ws_caption_html(recent_words, last_word: str | None, last_conf: float,
-                     buf_len: int, seq_len: int) -> str:
+                     buf_len: int, seq_len: int, speech: str = "") -> str:
     words_html = "&nbsp;&nbsp;".join(str(w) for w in list(recent_words)[-3:]) \
         if recent_words else "&nbsp;"
     if last_word:
@@ -237,11 +238,12 @@ def _ws_caption_html(recent_words, last_word: str | None, last_conf: float,
         status = f"Collecting frames…&nbsp;{buf_len}/{seq_len}"
     else:
         status = "Detecting…"
-    pct      = min(buf_len / seq_len, 1.0)
-    filled   = int(pct * 24)
-    bar      = "█" * filled + "░" * (24 - filled)
+    pct    = min(buf_len / seq_len, 1.0)
+    filled = int(pct * 24)
+    bar    = "█" * filled + "░" * (24 - filled)
     return (
-        f'<div style="{_CAPTION_BASE}font-family:Arial,sans-serif;">'
+        f'<div style="{_CAPTION_BASE}font-family:Arial,sans-serif;"'
+        f' data-speech="{speech}">'
         f'<div style="color:#fff;font-size:42px;font-weight:bold;line-height:1.3;'
         f'text-align:center;min-height:56px;">{words_html}</div>'
         f'<div style="color:#aaa;font-size:15px;min-height:20px;text-align:center;">'
@@ -377,7 +379,7 @@ def _suggest_word(word_buffer: list[str]) -> str:
 
 def process_fingerspell(frame, state, audio_on):
     if frame is None or fs_assets is None:
-        return _fs_caption_html(None, 0.0, [], ""), state, ""
+        return _fs_caption_html(None, 0.0, [], ""), state
 
     model, classes, device, detector = fs_assets
     smoother    = state["smoother"]
@@ -420,29 +422,28 @@ def process_fingerspell(frame, state, audio_on):
         elif not word_buffer or word_buffer[-1] != accepted:
             word_buffer.append(accepted)
 
-    speech = (accepted if audio_on and accepted and accepted != " " else "")
+    speech = accepted if audio_on and accepted and accepted != " " else ""
 
     state["smoother"]    = smoother
     state["word_buffer"] = word_buffer
 
     suggestion = _suggest_word(word_buffer)
-    caption    = _fs_caption_html(current_letter, confidence, word_buffer, suggestion)
-    return caption, state, speech
+    caption    = _fs_caption_html(current_letter, confidence, word_buffer, suggestion, speech)
+    return caption, state
 
 
 def clear_fingerspell(state):
-    # Speak the suggestion before wiping the buffer
     suggestion = _suggest_word(state["word_buffer"])
     state["word_buffer"] = []
     state["smoother"]    = LetterSmoother()
-    return _fs_caption_html(None, 0.0, [], ""), state, suggestion
+    return _fs_caption_html(None, 0.0, [], "", suggestion), state
 
 
 # ── Word-sign processing ───────────────────────────────────────────────────────
 
 def process_wordsign(frame, state, audio_on):
     if frame is None or ws_assets is None:
-        return _ws_caption_html([], None, 0.0, 0, 64), state, ""
+        return _ws_caption_html([], None, 0.0, 0, 64), state
 
     model, classes, device, seq_len, pose_det, hand_det = ws_assets
     frame_buf    = state["frame_buf"]
@@ -482,7 +483,7 @@ def process_wordsign(frame, state, audio_on):
             last_word = None
             last_conf = conf
 
-    speech = (last_word if audio_on and last_word and last_word != state.get("last_word") else "")
+    speech = last_word if audio_on and last_word and last_word != state.get("last_word") else ""
 
     state["frame_buf"]    = frame_buf
     state["frame_count"]  = frame_count
@@ -491,21 +492,20 @@ def process_wordsign(frame, state, audio_on):
     state["last_conf"]    = last_conf
 
     caption = _ws_caption_html(recent_words, last_word, last_conf,
-                               len(frame_buf), seq_len)
-    return caption, state, speech
+                               len(frame_buf), seq_len, speech)
+    return caption, state
 
 
 def clear_wordsign(state):
-    # Speak the last detected word before wiping history
-    recent = state.get("recent_words")
-    speech = state.get("last_word") or (str(list(recent)[-1]) if recent else "")
+    recent  = state.get("recent_words")
+    speech  = state.get("last_word") or (str(list(recent)[-1]) if recent else "")
     seq_len = ws_assets[3] if ws_assets else 64
     state["frame_buf"]    = deque(maxlen=seq_len)
     state["frame_count"]  = 0
     state["recent_words"] = deque(maxlen=10)
     state["last_word"]    = None
     state["last_conf"]    = 0.0
-    return _ws_caption_html([], None, 0.0, 0, seq_len), state, speech
+    return _ws_caption_html([], None, 0.0, 0, seq_len, speech), state
 
 
 # ── Gradio state factories ─────────────────────────────────────────────────────
@@ -527,7 +527,46 @@ def make_ws_state():
 
 # ── Gradio UI ──────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="ASL Recognition") as demo:
+_JS_SPEECH = """
+() => {
+    // Watch each caption div for changes to data-speech.
+    // When it's non-empty and different from the last spoken text, speak it.
+    // speechSynthesis.cancel() clears any queued speech so nothing piles up.
+    function watchCaption(elemId) {
+        let lastSpoken = '';
+        const container = document.getElementById(elemId);
+        if (!container) return;
+
+        const speak = (text) => {
+            if (!text || text === lastSpoken) return;
+            lastSpoken = text;
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+            }
+        };
+
+        // MutationObserver catches every innerHTML replacement Gradio does
+        new MutationObserver(() => {
+            const inner = container.querySelector('[data-speech]');
+            speak((inner && inner.getAttribute('data-speech')) || '');
+        }).observe(container, { subtree: true, childList: true, attributes: true });
+    }
+
+    // Retry until Gradio mounts the components
+    let tries = 0;
+    const iv = setInterval(() => {
+        const fs = document.getElementById('fs-caption');
+        const ws = document.getElementById('ws-caption');
+        if (fs) watchCaption('fs-caption');
+        if (ws) watchCaption('ws-caption');
+        if ((fs && ws) || ++tries > 20) clearInterval(iv);
+    }, 300);
+}
+"""
+
+
+with gr.Blocks(title="ASL Recognition", js=_JS_SPEECH) as demo:
     gr.Markdown("# ASL Recognition\nReal-time American Sign Language recognition using your camera.")
 
     with gr.Tabs():
@@ -542,37 +581,23 @@ with gr.Blocks(title="ASL Recognition") as demo:
 
             fs_webcam  = gr.Image(sources=["webcam"], streaming=True,
                                   label="Camera", mirror_webcam=False)
-            fs_caption = gr.HTML(value=_fs_caption_html(None, 0.0, [], ""))
+            fs_caption = gr.HTML(value=_fs_caption_html(None, 0.0, [], ""),
+                                 elem_id="fs-caption")
 
             with gr.Row():
                 fs_clear_btn    = gr.Button("Clear")
                 fs_audio_toggle = gr.Checkbox(label="Audio", value=True)
-            # Hidden textbox carries the speech cue to the browser JS handler
-            fs_speech_cue = gr.Textbox(visible=False, value="")
 
             fs_webcam.stream(
                 fn=process_fingerspell,
                 inputs=[fs_webcam, fs_state, fs_audio_toggle],
-                outputs=[fs_caption, fs_state, fs_speech_cue],
+                outputs=[fs_caption, fs_state],
                 stream_every=0.1,
-            )
-            # Pure JS handler: cancel any queued speech, then speak the new cue.
-            # speechSynthesis.cancel() clears the browser's speech queue, so
-            # stale events that arrive in a burst (tab switch, etc.) don't pile up.
-            fs_speech_cue.change(
-                fn=None,
-                inputs=[fs_speech_cue],
-                outputs=[],
-                js="""(text) => {
-                    if (!text || !text.trim() || !window.speechSynthesis) return;
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text.trim()));
-                }""",
             )
             fs_clear_btn.click(
                 fn=clear_fingerspell,
                 inputs=[fs_state],
-                outputs=[fs_caption, fs_state, fs_speech_cue],
+                outputs=[fs_caption, fs_state],
             )
 
         # ── Word Sign Tab ──────────────────────────────────────────────────────
@@ -592,33 +617,23 @@ with gr.Blocks(title="ASL Recognition") as demo:
             ws_webcam  = gr.Image(sources=["webcam"], streaming=True,
                                   label="Camera", mirror_webcam=False)
             ws_caption = gr.HTML(value=_ws_caption_html([], None, 0.0, 0,
-                                                        ws_assets[3] if ws_assets else 64))
+                                                        ws_assets[3] if ws_assets else 64),
+                                 elem_id="ws-caption")
 
             with gr.Row():
                 ws_clear_btn    = gr.Button("Clear")
                 ws_audio_toggle = gr.Checkbox(label="Audio", value=True)
-            ws_speech_cue = gr.Textbox(visible=False, value="")
 
             ws_webcam.stream(
                 fn=process_wordsign,
                 inputs=[ws_webcam, ws_state, ws_audio_toggle],
-                outputs=[ws_caption, ws_state, ws_speech_cue],
+                outputs=[ws_caption, ws_state],
                 stream_every=0.1,
-            )
-            ws_speech_cue.change(
-                fn=None,
-                inputs=[ws_speech_cue],
-                outputs=[],
-                js="""(text) => {
-                    if (!text || !text.trim() || !window.speechSynthesis) return;
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text.trim()));
-                }""",
             )
             ws_clear_btn.click(
                 fn=clear_wordsign,
                 inputs=[ws_state],
-                outputs=[ws_caption, ws_state, ws_speech_cue],
+                outputs=[ws_caption, ws_state],
             )
 
 if __name__ == "__main__":
