@@ -9,6 +9,7 @@ Runs on Hugging Face Spaces or locally with: python app.py
 """
 
 import os
+import tempfile
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -19,6 +20,7 @@ import mediapipe as mp_lib
 import numpy as np
 import torch
 import torch.nn as nn
+from gtts import gTTS
 from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import (
     HandLandmarker, HandLandmarkerOptions,
@@ -312,6 +314,35 @@ ws_assets = load_wordsign()
 spell = SpellChecker()
 
 
+# ── Audio helpers ────────────────────────────────────────────────────────────
+
+_AUDIO_DIR = Path(tempfile.gettempdir()) / "asl_audio"
+_AUDIO_DIR.mkdir(exist_ok=True)
+_audio_cache: dict[str, str] = {}
+
+
+def _get_audio_path(text: str) -> str | None:
+    """Return path to a cached MP3 for *text*, generating it if needed."""
+    key = text.strip().lower()
+    if key in _audio_cache:
+        return _audio_cache[key]
+    try:
+        path = str(_AUDIO_DIR / f"{key}.mp3")
+        if not Path(path).exists():
+            gTTS(text=key, lang="en", slow=False).save(path)
+        _audio_cache[key] = path
+        return path
+    except Exception:
+        return None
+
+
+def _pregen_letters():
+    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        _get_audio_path(letter)
+
+_pregen_letters()
+
+
 # ── Fingerspell processing ───────────────────────────────────────────────────
 
 def _suggest_word(word_buffer: list[str]) -> str:
@@ -324,11 +355,11 @@ def _suggest_word(word_buffer: list[str]) -> str:
     return correction.upper() if correction else raw.upper()
 
 
-def process_fingerspell(frame, state):
+def process_fingerspell(frame, state, audio_on):
     """Gradio streaming callback for fingerspell mode."""
     if frame is None or fs_assets is None:
         msg = "Fingerspell model not found." if fs_assets is None else ""
-        return None, msg, state
+        return None, msg, state, None
 
     model, classes, device, detector = fs_assets
     smoother = state["smoother"]
@@ -399,9 +430,13 @@ def process_fingerspell(frame, state):
     if suggestion:
         lines.append(f"Suggested word: {suggestion}")
 
+    audio_path = None
+    if audio_on and accepted and accepted != " ":
+        audio_path = _get_audio_path(accepted)
+
     state["smoother"] = smoother
     state["word_buffer"] = word_buffer
-    return frame, "\n".join(lines), state
+    return frame, "\n".join(lines), state, audio_path
 
 
 def clear_fingerspell(state):
@@ -413,11 +448,11 @@ def clear_fingerspell(state):
 
 # ── Word-sign processing ────────────────────────────────────────────────────
 
-def process_wordsign(frame, state):
+def process_wordsign(frame, state, audio_on):
     """Gradio streaming callback for word-sign mode."""
     if frame is None or ws_assets is None:
         msg = "Word-sign model not found." if ws_assets is None else ""
-        return None, msg, state
+        return None, msg, state, None
 
     model, classes, device, seq_len, pose_det, hand_det = ws_assets
     frame_buf = state["frame_buf"]
@@ -489,12 +524,16 @@ def process_wordsign(frame, state):
         f"Recent: {', '.join(list(recent_words)[-5:]) if recent_words else '---'}",
     ]
 
+    audio_path = None
+    if audio_on and last_word and last_word != state.get("last_word"):
+        audio_path = _get_audio_path(last_word)
+
     state["frame_buf"] = frame_buf
     state["frame_count"] = frame_count
     state["recent_words"] = recent_words
     state["last_word"] = last_word
     state["last_conf"] = last_conf
-    return frame, "\n".join(lines), state
+    return frame, "\n".join(lines), state, audio_path
 
 
 def clear_wordsign(state):
@@ -542,12 +581,15 @@ with gr.Blocks(title="ASL Recognition") as demo:
                 fs_output = gr.Image(label="Detection")
 
             fs_text = gr.Textbox(label="Predictions", lines=4, interactive=False)
-            fs_clear_btn = gr.Button("Clear Word Buffer")
+            with gr.Row():
+                fs_clear_btn = gr.Button("Clear Word Buffer")
+                fs_audio_toggle = gr.Checkbox(label="Audio", value=True)
+            fs_audio_out = gr.Audio(autoplay=True, visible=False, label="Audio")
 
             fs_webcam.stream(
                 fn=process_fingerspell,
-                inputs=[fs_webcam, fs_state],
-                outputs=[fs_output, fs_text, fs_state],
+                inputs=[fs_webcam, fs_state, fs_audio_toggle],
+                outputs=[fs_output, fs_text, fs_state, fs_audio_out],
                 stream_every=0.1,
             )
             fs_clear_btn.click(
@@ -575,12 +617,15 @@ with gr.Blocks(title="ASL Recognition") as demo:
                 ws_output = gr.Image(label="Detection")
 
             ws_text = gr.Textbox(label="Predictions", lines=3, interactive=False)
-            ws_clear_btn = gr.Button("Clear History")
+            with gr.Row():
+                ws_clear_btn = gr.Button("Clear History")
+                ws_audio_toggle = gr.Checkbox(label="Audio", value=True)
+            ws_audio_out = gr.Audio(autoplay=True, visible=False, label="Audio")
 
             ws_webcam.stream(
                 fn=process_wordsign,
-                inputs=[ws_webcam, ws_state],
-                outputs=[ws_output, ws_text, ws_state],
+                inputs=[ws_webcam, ws_state, ws_audio_toggle],
+                outputs=[ws_output, ws_text, ws_state, ws_audio_out],
                 stream_every=0.1,
             )
             ws_clear_btn.click(
