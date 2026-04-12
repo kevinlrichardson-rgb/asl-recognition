@@ -179,27 +179,28 @@ def extract_frame_features(pose_result, hand_result) -> np.ndarray:
 
 # ── Drawing helpers ────────────────────────────────────────────────────────────
 
-def draw_hand(frame_bgr: np.ndarray, landmarks, color=(0, 220, 180)):
+def draw_hand(frame_bgr: np.ndarray, landmarks, color=(0, 255, 255)):
     """Draw hand skeleton on a BGR frame."""
     h, w = frame_bgr.shape[:2]
     pts = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
     for a, b in _HAND_CONNECTIONS:
-        cv2.line(frame_bgr, pts[a], pts[b], (180, 210, 255), 1, cv2.LINE_AA)
+        cv2.line(frame_bgr, pts[a], pts[b], color, 2, cv2.LINE_AA)
     for i, pt in enumerate(pts):
-        radius = 6 if i == 0 else 4
+        radius = 10 if i == 0 else 7
+        cv2.circle(frame_bgr, pt, radius + 2, (255, 255, 255), 2, cv2.LINE_AA)  # white halo
         cv2.circle(frame_bgr, pt, radius, color, -1, cv2.LINE_AA)
-        cv2.circle(frame_bgr, pt, radius, (0, 0, 0), 1, cv2.LINE_AA)
 
 
 def draw_pose(frame_bgr: np.ndarray, pose_landmarks):
     """Draw upper-body pose skeleton on a BGR frame."""
     h, w = frame_bgr.shape[:2]
     pts = [(int(lm.x * w), int(lm.y * h)) for lm in pose_landmarks]
+    pose_color = (0, 255, 80)  # bright lime green in BGR
     for a, b in _POSE_CONNECTIONS:
-        cv2.line(frame_bgr, pts[a], pts[b], (80, 200, 80), 1, cv2.LINE_AA)
+        cv2.line(frame_bgr, pts[a], pts[b], pose_color, 2, cv2.LINE_AA)
     for idx in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28):
-        cv2.circle(frame_bgr, pts[idx], 5, (0, 230, 100), -1, cv2.LINE_AA)
-        cv2.circle(frame_bgr, pts[idx], 5, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.circle(frame_bgr, pts[idx], 9, (255, 255, 255), 2, cv2.LINE_AA)  # white halo
+        cv2.circle(frame_bgr, pts[idx], 7, pose_color, -1, cv2.LINE_AA)
 
 
 def _annotate(frame_rgb: np.ndarray, hand_landmarks_list=None, pose_landmarks=None) -> np.ndarray:
@@ -208,7 +209,7 @@ def _annotate(frame_rgb: np.ndarray, hand_landmarks_list=None, pose_landmarks=No
     if pose_landmarks:
         draw_pose(out, pose_landmarks)
     if hand_landmarks_list:
-        colors = [(0, 220, 180), (180, 120, 255)]
+        colors = [(0, 255, 255), (255, 0, 255)]  # bright yellow, bright magenta (BGR)
         for i, lms in enumerate(hand_landmarks_list):
             draw_hand(out, lms, colors[i % 2])
     return cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
@@ -594,9 +595,12 @@ with gr.Blocks(title="ASL Recognition") as demo:
             fs_state = gr.State(value=make_fs_state)
 
             with gr.Row():
-                fs_webcam = gr.Image(sources=["webcam"], streaming=True,
-                                     label="Camera", mirror_webcam=False)
-                fs_output = gr.Image(label="Skeleton")
+                with gr.Column(scale=1, min_width=180):
+                    fs_webcam = gr.Image(sources=["webcam"], streaming=True,
+                                         label="Enable Camera", mirror_webcam=False,
+                                         height=180)
+                with gr.Column(scale=3):
+                    fs_output = gr.Image(label="Live Feed", mirror_webcam=False)
 
             fs_caption   = gr.HTML(value=_fs_caption_html(None, 0.0, [], ""))
             fs_clear_btn = gr.Button("Clear")
@@ -628,9 +632,12 @@ with gr.Blocks(title="ASL Recognition") as demo:
             ws_state = gr.State(value=make_ws_state)
 
             with gr.Row():
-                ws_webcam = gr.Image(sources=["webcam"], streaming=True,
-                                     label="Camera", mirror_webcam=False)
-                ws_output = gr.Image(label="Skeleton")
+                with gr.Column(scale=1, min_width=180):
+                    ws_webcam = gr.Image(sources=["webcam"], streaming=True,
+                                         label="Enable Camera", mirror_webcam=False,
+                                         height=180)
+                with gr.Column(scale=3):
+                    ws_output = gr.Image(label="Live Feed", mirror_webcam=False)
 
             ws_caption   = gr.HTML(value=_ws_caption_html([], None, 0.0, 0,
                                                           ws_assets[3] if ws_assets else 64))
