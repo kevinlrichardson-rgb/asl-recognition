@@ -215,6 +215,41 @@ def _annotate(frame_rgb: np.ndarray, hand_landmarks_list=None, pose_landmarks=No
     return cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
 
 
+def _overlay_text(frame_rgb: np.ndarray, line1: str, line2: str = "") -> np.ndarray:
+    """Draw a semi-transparent banner with status text on the bottom of a frame."""
+    out = frame_rgb.copy()
+    h, w = out.shape[:2]
+    banner_h = 70 if line2 else 46
+    overlay = out.copy()
+    cv2.rectangle(overlay, (0, h - banner_h), (w, h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.65, out, 0.35, 0, out)
+    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2
+    tw1, th1 = cv2.getTextSize(line1, font, scale, thick)[0]
+    cv2.putText(out, line1, ((w - tw1) // 2, h - banner_h + 28),
+                font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+    if line2:
+        tw2, _ = cv2.getTextSize(line2, font, 0.55, 1)[0]
+        cv2.putText(out, line2, ((w - tw2) // 2, h - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1, cv2.LINE_AA)
+    return out
+
+
+def _make_placeholder_image(line1: str, line2: str = "",
+                             w: int = 640, h: int = 480) -> np.ndarray:
+    """Dark placeholder image shown before the camera feed is active."""
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img[:] = (30, 30, 30)
+    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2
+    tw, _ = cv2.getTextSize(line1, font, scale, thick)[0]
+    cv2.putText(img, line1, ((w - tw) // 2, h // 2 - (18 if line2 else 0)),
+                font, scale, (200, 200, 200), thick, cv2.LINE_AA)
+    if line2:
+        tw2, _ = cv2.getTextSize(line2, font, 0.6, 1)[0]
+        cv2.putText(img, line2, ((w - tw2) // 2, h // 2 + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (120, 120, 120), 1, cv2.LINE_AA)
+    return img
+
+
 # ── Multi-strategy hand detection (mirrors demo.py) ───────────────────────────
 
 def _detect_hand_live(frame_rgb: np.ndarray, detector):
@@ -582,8 +617,17 @@ def process_wordsign(frame, state):
         hand_landmarks_list=hand_result.hand_landmarks if hand_result.hand_landmarks else None,
         pose_landmarks=pose_result.pose_landmarks[0] if pose_result.pose_landmarks else None,
     )
-    caption = _ws_caption_html(recent_words, last_word, last_conf,
-                               len(frame_buf), seq_len)
+
+    buf_now = len(frame_buf)
+    if buf_now < seq_len:
+        pct = int(buf_now / seq_len * 100)
+        annotated = _overlay_text(
+            annotated,
+            f"Buffering: {buf_now} / {seq_len} frames  ({pct}%)",
+            "Please wait — detection starts once buffer is full",
+        )
+
+    caption = _ws_caption_html(recent_words, last_word, last_conf, buf_now, seq_len)
     return annotated, caption, state
 
 
@@ -635,7 +679,10 @@ with gr.Blocks(title="ASL Recognition") as demo:
                                          label="Enable Camera", mirror_webcam=False,
                                          height=180)
                 with gr.Column(scale=3):
-                    fs_output = gr.Image(label="Live Feed", mirror_webcam=False)
+                    fs_output = gr.Image(label="Live Feed", mirror_webcam=False,
+                                         value=_make_placeholder_image(
+                                             "Enable camera to begin",
+                                             "Show ASL letters to the camera"))
 
             fs_caption   = gr.HTML(value=_fs_caption_html(None, 0.0, [], ""))
             fs_clear_btn = gr.Button("Clear")
@@ -672,7 +719,10 @@ with gr.Blocks(title="ASL Recognition") as demo:
                                          label="Enable Camera", mirror_webcam=False,
                                          height=180)
                 with gr.Column(scale=3):
-                    ws_output = gr.Image(label="Live Feed", mirror_webcam=False)
+                    ws_output = gr.Image(label="Live Feed", mirror_webcam=False,
+                                         value=_make_placeholder_image(
+                                             "Enable camera to begin",
+                                             "Perform ASL signs in front of the camera"))
 
             ws_caption   = gr.HTML(value=_ws_caption_html([], None, 0.0, 0,
                                                           ws_assets[3] if ws_assets else 64))
