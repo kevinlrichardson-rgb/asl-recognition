@@ -412,10 +412,45 @@ def load_wordsign():
     return model, classes, device, seq_len, pose_det, hand_det
 
 
+def _warmup_fingerspell(assets):
+    """Run one dummy inference to pre-compile kernels and avoid first-frame lag."""
+    if assets is None:
+        return
+    model, classes, device, detector = assets
+    dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+    mp_img = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=dummy)
+    detector.detect(mp_img)
+    feat_dim = model.net[0].in_features
+    with torch.no_grad():
+        model(torch.zeros((1, feat_dim), device=device))
+    print("Fingerspell warmup complete")
+
+
+def _warmup_wordsign(assets):
+    """Run one dummy inference to pre-compile kernels and avoid first-frame lag."""
+    if assets is None:
+        return
+    model, classes, device, seq_len, pose_det, hand_det = assets
+    dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+    mp_img = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=dummy)
+    pose_det.detect(mp_img)
+    hand_det.detect(mp_img)
+    feat_dim = model.input_proj[0].in_features
+    dummy_seq = torch.zeros((1, seq_len, feat_dim), device=device)
+    dummy_len = torch.tensor([seq_len], dtype=torch.long, device=device)
+    with torch.no_grad():
+        model(dummy_seq, dummy_len)
+    print("Word-sign warmup complete")
+
+
 # Load models at import time (cached by the process)
 fs_assets = load_fingerspell()
 ws_assets = load_wordsign()
 spell     = SpellChecker()
+
+# Warm up all models so the first real frame has no compilation delay
+_warmup_fingerspell(fs_assets)
+_warmup_wordsign(ws_assets)
 
 
 # ── Fingerspell processing ─────────────────────────────────────────────────────
