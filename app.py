@@ -8,6 +8,8 @@ Two tabs:
 Runs on Hugging Face Spaces or locally with: python app.py
 """
 
+import concurrent.futures
+import time
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -25,6 +27,9 @@ from mediapipe.tasks.python.vision import (
     RunningMode,
 )
 from spellchecker import SpellChecker
+
+# Thread pool for parallel MediaPipe detection (pose + hand run concurrently)
+_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -57,7 +62,9 @@ WINDOW_SIZE = 15
 STABLE_COUNT = 10
 COOLDOWN_FRAMES = 8
 FS_CONFIDENCE_THRESHOLD = 0.50
-WS_STRIDE = 8
+WS_STRIDE            = 4    # run inference every N frames (was 8)
+WS_MIN_FRAMES        = 16   # start predicting after this many frames (zero-pad to seq_len)
+WS_WARMUP_CONF_THRESH = 0.75  # higher threshold during warmup to suppress noisy early preds
 
 _HAND_CONNECTIONS = [
     (0,1),(1,2),(2,3),(3,4),(0,5),(5,6),(6,7),(7,8),
@@ -292,6 +299,14 @@ def _detect_hand_live(frame_rgb: np.ndarray, detector):
     return detector.detect(mp_img)
 
 
+def _detect_ws_parallel(frame_rgb: np.ndarray, pose_det, hand_det, ts_ms: int):
+    """Run pose and hand detection concurrently. Returns (pose_result, hand_result)."""
+    mp_img = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=frame_rgb)
+    fut_pose = _THREAD_POOL.submit(pose_det.detect_for_video, mp_img, ts_ms)
+    fut_hand = _THREAD_POOL.submit(hand_det.detect_for_video, mp_img, ts_ms)
+    return fut_pose.result(), fut_hand.result()
+
+
 # ── Caption HTML helpers ───────────────────────────────────────────────────────
 
 _CAPTION_BASE = (
@@ -446,14 +461,14 @@ def load_wordsign():
 
     pose_det = PoseLandmarker.create_from_options(PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(POSE_MODEL_PATH)),
-        running_mode=RunningMode.IMAGE,
+        running_mode=RunningMode.VIDEO,
         min_pose_detection_confidence=0.1,
         min_pose_presence_confidence=0.1,
         min_tracking_confidence=0.1,
     ))
     hand_det = HandLandmarker.create_from_options(HandLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(HAND_MODEL_PATH)),
-        running_mode=RunningMode.IMAGE,
+        running_mode=RunningMode.VIDEO,
         num_hands=2,
         min_hand_detection_confidence=0.1,
         min_hand_presence_confidence=0.1,
@@ -484,8 +499,8 @@ def _warmup_wordsign(assets):
     model, classes, device, seq_len, pose_det, hand_det = assets
     dummy = np.zeros((480, 640, 3), dtype=np.uint8)
     mp_img = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=dummy)
-    pose_det.detect(mp_img)
-    hand_det.detect(mp_img)
+    pose_det.detect_for_video(mp_img, 0)
+    hand_det.detect_for_video(mp_img, 0)
     feat_dim = model.input_proj[0].in_features
     dummy_seq = torch.zeros((1, seq_len, feat_dim), device=device)
     dummy_len = torch.tensor([seq_len], dtype=torch.long, device=device)
@@ -598,18 +613,34 @@ def process_wordsign(frame, state):
     last_conf    = state["last_conf"]
     conf_thresh  = state.get("conf_thresh", 0.5)
 
-    mp_image    = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=frame)
-    pose_result = pose_det.detect(mp_image)
-    hand_result = hand_det.detect(mp_image)
+    # ── Timestamp for VIDEO mode (must be strictly increasing) ──────────────
+    if state["start_time"] is None:
+        state["start_time"] = time.monotonic()
+    ts_ms = int((time.monotonic() - state["start_time"]) * 1000)
+    ts_ms = max(ts_ms, state["ts_ms"] + 1)
+    state["ts_ms"] = ts_ms
+
+    # ── Parallel pose + hand detection ──────────────────────────────────────
+    pose_result, hand_result = _detect_ws_parallel(frame, pose_det, hand_det, ts_ms)
 
     feat = extract_frame_features(pose_result, hand_result)
     frame_buf.append(feat)
     frame_count += 1
 
-    if len(frame_buf) >= seq_len and frame_count % WS_STRIDE == 0:
-        seq      = np.stack(list(frame_buf)[-seq_len:], axis=0)
+    # ── Early inference: start after WS_MIN_FRAMES, zero-pad to seq_len ─────
+    buf_now = len(frame_buf)
+    if buf_now >= WS_MIN_FRAMES and frame_count % WS_STRIDE == 0:
+        avail     = buf_now
+        seq_list  = list(frame_buf)
+        feat_dim  = model.input_proj[0].in_features
+        if avail < seq_len:
+            padding  = [np.zeros(feat_dim, dtype=np.float32)] * (seq_len - avail)
+            seq_list = padding + seq_list  # prepend zeros; AttentionPool masks them out
+        seq      = np.stack(seq_list, axis=0)
         seq_t    = torch.from_numpy(seq).unsqueeze(0).to(device)
-        length_t = torch.tensor([seq_len], dtype=torch.long, device=device)
+        length_t = torch.tensor([min(avail, seq_len)], dtype=torch.long, device=device)
+        # Higher threshold during warmup to suppress noisy early predictions
+        eff_thresh = WS_WARMUP_CONF_THRESH if avail < seq_len else conf_thresh
 
         with torch.no_grad():
             logits = model(seq_t, length_t)
@@ -617,7 +648,7 @@ def process_wordsign(frame, state):
 
         idx  = int(np.argmax(probs))
         conf = float(probs[idx])
-        if conf >= conf_thresh:
+        if conf >= eff_thresh:
             word = str(classes[idx])
             if word != last_word:
                 last_word = word
@@ -640,12 +671,11 @@ def process_wordsign(frame, state):
         pose_landmarks=pose_result.pose_landmarks[0] if pose_result.pose_landmarks else None,
     )
 
-    buf_now = len(frame_buf)
-    if buf_now < seq_len:
+    if buf_now < WS_MIN_FRAMES:
         annotated = _overlay_center(
             annotated,
             "Starting up, please wait ...",
-            f"Loading frames: {buf_now} / {seq_len}",
+            f"Loading frames: {buf_now} / {WS_MIN_FRAMES}",
         )
 
     caption = _ws_caption_html(recent_words, last_word, last_conf, buf_now, seq_len)
@@ -659,6 +689,8 @@ def clear_wordsign(state):
     state["recent_words"] = deque(maxlen=10)
     state["last_word"]    = None
     state["last_conf"]    = 0.0
+    state["start_time"]   = None
+    state["ts_ms"]        = 0
     return _ws_caption_html([], None, 0.0, 0, seq_len), state
 
 
@@ -676,6 +708,8 @@ def make_ws_state():
         "recent_words": deque(maxlen=10),
         "last_word":    None,
         "last_conf":    0.0,
+        "start_time":   None,  # wall-clock start for VIDEO mode timestamps
+        "ts_ms":        0,     # last timestamp sent to MediaPipe (must be strictly increasing)
     }
 
 

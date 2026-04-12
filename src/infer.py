@@ -678,13 +678,21 @@ class WordSignRecogniser:
         self._frame_buf.append(feat)
         self._frame_count += 1
 
-        if (len(self._frame_buf) < self._seq_len or
-                self._frame_count % self._stride != 0):
+        _MIN_FRAMES = 16  # start predicting early; zero-pad to seq_len
+        avail = len(self._frame_buf)
+        if avail < _MIN_FRAMES or self._frame_count % self._stride != 0:
             return self._last_word, self._last_conf
 
-        seq = np.stack(self._frame_buf, axis=0)
+        seq_list = list(self._frame_buf)
+        if avail < self._seq_len:
+            pad = [np.zeros(225, dtype=np.float32)] * (self._seq_len - avail)
+            seq_list = pad + seq_list  # prepend zeros; AttentionPool masks them out
+        seq = np.stack(seq_list, axis=0)
         seq_t = torch.from_numpy(seq).unsqueeze(0).to(self._device)
-        length_t = torch.tensor([self._seq_len], dtype=torch.long, device=self._device)
+        length_t = torch.tensor([min(avail, self._seq_len)], dtype=torch.long,
+                                 device=self._device)
+        # Higher threshold during warmup to suppress noisy early predictions
+        eff_thresh = 0.75 if avail < self._seq_len else self._conf_thresh
 
         with torch.no_grad():
             logits = self._model(seq_t, length_t)
@@ -692,7 +700,7 @@ class WordSignRecogniser:
 
         idx  = int(np.argmax(probs))
         conf = float(probs[idx])
-        word = str(self._classes[idx]) if conf >= self._conf_thresh else None
+        word = str(self._classes[idx]) if conf >= eff_thresh else None
 
         self._last_word = word
         self._last_conf = conf
