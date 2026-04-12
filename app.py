@@ -215,22 +215,38 @@ def _annotate(frame_rgb: np.ndarray, hand_landmarks_list=None, pose_landmarks=No
     return cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
 
 
-def _overlay_text(frame_rgb: np.ndarray, line1: str, line2: str = "") -> np.ndarray:
-    """Draw a semi-transparent banner with status text on the bottom of a frame."""
+def _overlay_center(frame_rgb: np.ndarray, line1: str, line2: str = "") -> np.ndarray:
+    """Draw a semi-transparent centered panel with status text over the frame."""
     out = frame_rgb.copy()
     h, w = out.shape[:2]
-    banner_h = 70 if line2 else 46
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    # Measure text sizes
+    (tw1, th1), _ = cv2.getTextSize(line1, font, 1.0, 2)
+    (tw2, th2), _ = cv2.getTextSize(line2, font, 0.6, 1) if line2 else ((0, 0), 0)
+
+    pad_x, pad_y = 36, 24
+    box_w = max(tw1, tw2) + pad_x * 2
+    box_h = th1 + (th2 + 16 if line2 else 0) + pad_y * 2
+    x0 = (w - box_w) // 2
+    y0 = (h - box_h) // 2
+
+    # Semi-transparent dark rectangle
     overlay = out.copy()
-    cv2.rectangle(overlay, (0, h - banner_h), (w, h), (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.65, out, 0.35, 0, out)
-    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.75, 2
-    tw1, th1 = cv2.getTextSize(line1, font, scale, thick)[0]
-    cv2.putText(out, line1, ((w - tw1) // 2, h - banner_h + 28),
-                font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+    cv2.rectangle(overlay, (x0, y0), (x0 + box_w, y0 + box_h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.70, out, 0.30, 0, out)
+
+    # Line 1 — large white text
+    tx1 = x0 + (box_w - tw1) // 2
+    ty1 = y0 + pad_y + th1
+    cv2.putText(out, line1, (tx1, ty1), font, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+
+    # Line 2 — smaller grey text
     if line2:
-        tw2, _ = cv2.getTextSize(line2, font, 0.55, 1)[0]
-        cv2.putText(out, line2, ((w - tw2) // 2, h - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1, cv2.LINE_AA)
+        tx2 = x0 + (box_w - tw2) // 2
+        ty2 = ty1 + 16 + th2
+        cv2.putText(out, line2, (tx2, ty2), font, 0.6, (180, 180, 180), 1, cv2.LINE_AA)
+
     return out
 
 
@@ -626,11 +642,10 @@ def process_wordsign(frame, state):
 
     buf_now = len(frame_buf)
     if buf_now < seq_len:
-        pct = int(buf_now / seq_len * 100)
-        annotated = _overlay_text(
+        annotated = _overlay_center(
             annotated,
-            f"Buffering: {buf_now} / {seq_len} frames  ({pct}%)",
-            "Please wait — detection starts once buffer is full",
+            "Starting up, please wait ...",
+            f"Loading frames: {buf_now} / {seq_len}",
         )
 
     caption = _ws_caption_html(recent_words, last_word, last_conf, buf_now, seq_len)
