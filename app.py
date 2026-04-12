@@ -500,9 +500,15 @@ def _suggest_word(word_buffer: list[str]) -> str:
     return correction.upper() if correction else raw.upper()
 
 
+_FS_PLACEHOLDER = _make_placeholder_image(
+    "Enable camera to begin", "Show ASL letters to the camera")
+_WS_PLACEHOLDER = _make_placeholder_image(
+    "Enable camera to begin", "Perform ASL signs in front of the camera")
+
+
 def process_fingerspell(frame, state):
     if frame is None or fs_assets is None:
-        return None, _fs_caption_html(None, 0.0, [], ""), state
+        return _FS_PLACEHOLDER, _fs_caption_html(None, 0.0, [], ""), state
 
     model, classes, device, detector = fs_assets
     smoother    = state["smoother"]
@@ -566,7 +572,7 @@ def clear_fingerspell(state):
 
 def process_wordsign(frame, state):
     if frame is None or ws_assets is None:
-        return None, _ws_caption_html([], None, 0.0, 0, 64), state
+        return _WS_PLACEHOLDER, _ws_caption_html([], None, 0.0, 0, 64), state
 
     model, classes, device, seq_len, pose_det, hand_det = ws_assets
     frame_buf    = state["frame_buf"]
@@ -679,10 +685,7 @@ with gr.Blocks(title="ASL Recognition") as demo:
                                          label="Enable Camera", mirror_webcam=False,
                                          height=180)
                 with gr.Column(scale=3):
-                    fs_output = gr.Image(label="Live Feed", mirror_webcam=False,
-                                         value=_make_placeholder_image(
-                                             "Enable camera to begin",
-                                             "Show ASL letters to the camera"))
+                    fs_output = gr.Image(label="Live Feed", mirror_webcam=False)
 
             fs_caption   = gr.HTML(value=_fs_caption_html(None, 0.0, [], ""))
             fs_clear_btn = gr.Button("Clear")
@@ -719,10 +722,7 @@ with gr.Blocks(title="ASL Recognition") as demo:
                                          label="Enable Camera", mirror_webcam=False,
                                          height=180)
                 with gr.Column(scale=3):
-                    ws_output = gr.Image(label="Live Feed", mirror_webcam=False,
-                                         value=_make_placeholder_image(
-                                             "Enable camera to begin",
-                                             "Perform ASL signs in front of the camera"))
+                    ws_output = gr.Image(label="Live Feed", mirror_webcam=False)
 
             ws_caption   = gr.HTML(value=_ws_caption_html([], None, 0.0, 0,
                                                           ws_assets[3] if ws_assets else 64))
