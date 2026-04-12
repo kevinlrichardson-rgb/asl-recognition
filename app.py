@@ -222,7 +222,7 @@ def _overlay_center(frame_rgb: np.ndarray, line1: str, line2: str = "") -> np.nd
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     # Measure text sizes
-    (tw1, th1), _ = cv2.getTextSize(line1, font, 1.0, 2)
+    (tw1, th1), _ = cv2.getTextSize(line1, font, 3.0, 5)
     (tw2, th2), _ = cv2.getTextSize(line2, font, 0.6, 1) if line2 else ((0, 0), 0)
 
     pad_x, pad_y = 36, 24
@@ -239,7 +239,7 @@ def _overlay_center(frame_rgb: np.ndarray, line1: str, line2: str = "") -> np.nd
     # Line 1 — large white text
     tx1 = x0 + (box_w - tw1) // 2
     ty1 = y0 + pad_y + th1
-    cv2.putText(out, line1, (tx1, ty1), font, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(out, line1, (tx1, ty1), font, 3.0, (255, 255, 255), 5, cv2.LINE_AA)
 
     # Line 2 — smaller grey text
     if line2:
