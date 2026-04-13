@@ -1,0 +1,4 @@
+models/wlasl_word_model.pt filter=lfs diff=lfs merge=lfs -text
+models/*.pt filter=lfs diff=lfs merge=lfs -text
+models/*.task filter=lfs diff=lfs merge=lfs -text
+models/*.npy filter=lfs diff=lfs merge=lfs -text

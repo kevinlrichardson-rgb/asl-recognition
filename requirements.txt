@@ -1,17 +1,17 @@
-# PyTorch for Jetson (pre-installed in JetPack, do not pip install)
-# torch==2.1.0  # Use pre-built wheel from JetPack
+# Core ML / Vision — CPU build (no CUDA required)
+# For Jetson/CUDA setup, see requirements-jetson.txt
+torch>=2.1
+numpy>=1.26
+opencv-python-headless>=4.8    # headless is fine: infer.py has --headless, app.py uses Gradio
+mediapipe>=0.10.8
 
-# Core dependencies with version pins for stability
-numpy==1.26.4
-pandas==2.1.4
-matplotlib==3.8.2
-scikit-learn==1.3.2
-seaborn==0.13.0
-opencv-python-headless==4.8.1.78
-mediapipe==0.10.8
+# Web UI
+gradio>=5.0
 
-# Additional useful packages for ML on Jetson
-tensorboard==2.14.1
-scipy==1.11.4
-Pillow==10.1.0
-tqdm==4.66.1
+# Training utilities
+scikit-learn>=1.3
+tqdm>=4.66
+pandas>=2.1
+
+# Evaluation / NLP
+pyspellchecker
