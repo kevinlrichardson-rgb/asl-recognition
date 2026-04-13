@@ -5,8 +5,14 @@ Supports two modes via --mode:
   fingerspell : Real-time ASL fingerspelling (letter-by-letter) recognition
   wordsign    : Sliding-window word-sign recognition (WLASL LSTM model)
 
+Running with no arguments (or on a machine without a display) automatically
+launches the Gradio web UI at http://localhost:7860.
+
 Usage:
-    # Fingerspelling from webcam
+    # Launch web UI (default when no display is available)
+    python src/infer.py
+
+    # Fingerspelling from webcam (OpenCV window)
     python src/infer.py --mode fingerspell --webcam
 
     # Fingerspelling from video file
@@ -832,14 +838,26 @@ def _run_wordsign(source, headless=False, output_path=None, conf_threshold=0.4):
 #  ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _launch_web_ui():
+    """Launch app.py (Gradio web UI) as a fallback when no display is available."""
+    import subprocess
+    app_path = Path(__file__).resolve().parent.parent / "app.py"
+    if not app_path.exists():
+        sys.exit("[ERROR] app.py not found. Cannot launch web UI.")
+    print("[INFO] No display detected — launching Gradio web UI instead.")
+    print("[INFO] Open http://localhost:7860 in your browser.")
+    subprocess.run([sys.executable, str(app_path)], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Unified ASL Inference — fingerspell or word-sign mode",
+        description="Unified ASL Inference — fingerspell or word-sign mode. "
+                    "Run with no arguments to launch the Gradio web UI.",
     )
-    parser.add_argument("--mode", required=True, choices=["fingerspell", "wordsign"],
+    parser.add_argument("--mode", choices=["fingerspell", "wordsign"],
                         help="Inference mode: 'fingerspell' for letter recognition, "
                              "'wordsign' for WLASL word-sign recognition")
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--webcam", action="store_true",
                        help="Use live webcam feed")
     group.add_argument("--video", type=str, metavar="PATH",
@@ -854,13 +872,22 @@ def main():
                         help="Confidence threshold (default: 0.4, wordsign only)")
     args = parser.parse_args()
 
+    # No arguments supplied, or no display available → launch the web UI
+    no_source = not args.webcam and not args.video
+    if no_source or not _has_display():
+        if not no_source and not args.headless:
+            # Source was given but no display — inform the user
+            print("[INFO] No display detected — switching to Gradio web UI.")
+        _launch_web_ui()
+        return
+
+    if not args.mode:
+        parser.error("--mode is required when using --webcam or --video")
+
     if args.video and not os.path.isfile(args.video):
         sys.exit(f"[ERROR] Video file not found: {args.video}")
 
-    headless = args.headless or not _has_display()
-    if headless and not args.headless:
-        print("[INFO] No display detected - running in headless mode.")
-
+    headless = args.headless
     source = args.camera if args.webcam else args.video
 
     if args.mode == "fingerspell":
