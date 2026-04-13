@@ -297,9 +297,7 @@ def _draw_caption(frame, recent_words):
 
 
 def _has_display() -> bool:
-    if sys.platform == "win32":
-        return True
-    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return True
 
 
 def _ensure_model(path: Path, url: str, name: str):
