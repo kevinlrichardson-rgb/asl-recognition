@@ -362,10 +362,10 @@ with gr.Blocks(title="ASL Recognition") as demo:
     with gr.Row():
         with gr.Column(scale=1, min_width=180):
             fs_webcam = gr.Image(sources=["webcam"], streaming=True,
-                                 label="Enable Camera", mirror_webcam=False,
+                                 label="Enable Camera",
                                  height=180)
         with gr.Column(scale=3):
-            fs_output = gr.Image(label="Live Feed", mirror_webcam=False)
+            fs_output = gr.Image(label="Live Feed")
 
     fs_caption   = gr.HTML(value=_fs_caption_html(None, 0.0, [], ""))
     fs_clear_btn = gr.Button("Clear")
