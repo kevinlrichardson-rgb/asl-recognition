@@ -34,7 +34,9 @@ import argparse
 import collections
 import csv
 import os
+import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from collections import deque
@@ -836,9 +838,219 @@ def _run_wordsign(source, headless=False, output_path=None, conf_threshold=0.4):
 #  ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _launch_gui():
+    """Tkinter launcher — file/folder pickers, mode toggle, confidence slider, output log."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog, scrolledtext
+    except ImportError:
+        sys.exit("[ERROR] tkinter not available. Run with explicit flags:\n"
+                 "  python src/infer.py --mode fingerspell --video path/to/video.mp4")
+
+    # ── Palette ───────────────────────────────────────────────────────────────
+    BG        = "#1e1e1e"
+    FG        = "#e0e0e0"
+    ENTRY_BG  = "#2a2a2a"
+    ENTRY_FG  = "#ffffff"
+    BTN_BLUE  = "#1a6fc4"
+    RUN_BG    = "#2e7d32"
+    CANCEL_BG = "#c0392b"
+    CLEAR_BG  = "#3a3a3a"
+    LOG_BG    = "#121212"
+    LOG_FG    = "#cccccc"
+    SEL_BG    = "#1a6fc4"
+    UNSEL_BG  = "#3a3a3a"
+
+    root = tk.Tk()
+    root.title("ASL Inference Launcher")
+    root.configure(bg=BG)
+    root.minsize(760, 560)
+
+    _proc = [None]  # holds the running subprocess so Cancel can terminate it
+
+    # ── State ─────────────────────────────────────────────────────────────────
+    mode_var       = tk.StringVar(value="fingerspell")
+    headless_var   = tk.BooleanVar(value=True)
+    conf_var       = tk.DoubleVar(value=0.40)
+    video_var      = tk.StringVar()
+    out_folder_var = tk.StringVar()
+    out_name_var   = tk.StringVar()
+
+    # ── Layout frame ─────────────────────────────────────────────────────────
+    frm = tk.Frame(root, bg=BG)
+    frm.pack(fill="both", expand=True, padx=18, pady=14)
+    frm.columnconfigure(1, weight=1)
+
+    def _section(row, text):
+        tk.Label(frm, text=text, bg=BG, fg="#ffffff",
+                 font=("Helvetica", 10, "bold")).grid(
+            row=row, column=0, columnspan=3, sticky="w", pady=(14, 2))
+
+    def _label(row, text):
+        tk.Label(frm, text=text, bg=BG, fg=FG).grid(
+            row=row, column=0, sticky="w", padx=(0, 10), pady=4)
+
+    def _entry(row, var, colspan=1):
+        e = tk.Entry(frm, textvariable=var, bg=ENTRY_BG, fg=ENTRY_FG,
+                     insertbackground=ENTRY_FG, relief="flat", bd=4)
+        e.grid(row=row, column=1, columnspan=colspan, sticky="ew", pady=4)
+        return e
+
+    def _browse_btn(row, command):
+        tk.Button(frm, text="Browse", bg=BTN_BLUE, fg="#ffffff",
+                  relief="flat", bd=0, padx=10, pady=4, cursor="hand2",
+                  command=command).grid(row=row, column=2, padx=(8, 0), pady=4)
+
+    # ── Input / Output ────────────────────────────────────────────────────────
+    _section(0, "Input / Output")
+
+    _label(1, "Input Video")
+    _entry(1, video_var)
+    _browse_btn(1, lambda: video_var.set(
+        filedialog.askopenfilename(
+            title="Select input video",
+            filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All", "*.*")]
+        ) or video_var.get()))
+
+    _label(2, "Output Folder")
+    _entry(2, out_folder_var)
+    _browse_btn(2, lambda: out_folder_var.set(
+        filedialog.askdirectory(title="Select output folder") or out_folder_var.get()))
+
+    _label(3, "Output Filename")
+    _entry(3, out_name_var, colspan=2)
+
+    # ── Options ───────────────────────────────────────────────────────────────
+    _section(4, "Options")
+
+    opts = tk.Frame(frm, bg=BG)
+    opts.grid(row=5, column=0, columnspan=3, sticky="ew", pady=4)
+
+    tk.Label(opts, text="Mode:", bg=BG, fg=FG).pack(side="left", padx=(0, 8))
+
+    def _set_mode(m):
+        mode_var.set(m)
+        fs_btn.config(bg=SEL_BG   if m == "fingerspell" else UNSEL_BG,
+                      fg="#ffffff" if m == "fingerspell" else "#aaaaaa")
+        ws_btn.config(bg=SEL_BG   if m == "wordsign"    else UNSEL_BG,
+                      fg="#ffffff" if m == "wordsign"    else "#aaaaaa")
+
+    fs_btn = tk.Button(opts, text="fingerspell", relief="flat", bd=0,
+                       padx=12, pady=5, cursor="hand2",
+                       command=lambda: _set_mode("fingerspell"))
+    fs_btn.pack(side="left", padx=2)
+    ws_btn = tk.Button(opts, text="wordsign", relief="flat", bd=0,
+                       padx=12, pady=5, cursor="hand2",
+                       command=lambda: _set_mode("wordsign"))
+    ws_btn.pack(side="left", padx=2)
+    _set_mode("fingerspell")
+
+    conf_lbl = tk.Label(opts, text="0.40", bg=BG, fg=FG, width=5)
+    tk.Label(opts, text="Confidence:", bg=BG, fg=FG).pack(side="left", padx=(28, 6))
+    tk.Scale(opts, variable=conf_var, from_=0.0, to=1.0, resolution=0.01,
+             orient="horizontal", bg=BG, fg=FG, troughcolor="#3a3a3a",
+             highlightthickness=0, showvalue=False, length=160,
+             command=lambda v: conf_lbl.config(text=f"{float(v):.2f}")
+             ).pack(side="left")
+    conf_lbl.pack(side="left", padx=(6, 0))
+
+    hl_row = tk.Frame(frm, bg=BG)
+    hl_row.grid(row=6, column=0, columnspan=3, sticky="w", pady=(2, 6))
+    tk.Checkbutton(hl_row, text="Headless  (suppress CV2 preview window)",
+                   variable=headless_var, bg=BG, fg=FG, selectcolor="#3a3a3a",
+                   activebackground=BG, activeforeground=FG).pack(side="left")
+
+    # ── Action buttons ────────────────────────────────────────────────────────
+    btn_row = tk.Frame(frm, bg=BG)
+    btn_row.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(8, 6))
+    btn_row.columnconfigure(0, weight=1)
+
+    def _append(text):
+        log_box.config(state="normal")
+        log_box.insert("end", text)
+        log_box.see("end")
+        log_box.config(state="disabled")
+
+    def _run():
+        video = video_var.get().strip()
+        if not video:
+            _append("[ERROR] Please select an input video file.\n")
+            return
+        if not os.path.isfile(video):
+            _append(f"[ERROR] File not found: {video}\n")
+            return
+
+        out_folder = out_folder_var.get().strip()
+        out_name   = out_name_var.get().strip()
+        out_path   = None
+        if out_folder:
+            out_path = os.path.join(out_folder,
+                                    out_name if out_name else Path(video).stem + "_out.mp4")
+
+        cmd = [sys.executable, __file__,
+               "--mode", mode_var.get(),
+               "--video", video,
+               "--conf", f"{conf_var.get():.2f}"]
+        if headless_var.get():
+            cmd.append("--headless")
+        if out_path:
+            cmd += ["--output", out_path]
+
+        _append("$ " + " ".join(cmd) + "\n\n")
+        run_btn.config(state="disabled")
+
+        def _worker():
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        text=True, bufsize=1)
+                _proc[0] = proc
+                for line in proc.stdout:
+                    root.after(0, _append, line)
+                proc.wait()
+                root.after(0, _append, f"\n[Done — exit code {proc.returncode}]\n")
+            except Exception as exc:
+                root.after(0, _append, f"[ERROR] {exc}\n")
+            finally:
+                _proc[0] = None
+                root.after(0, lambda: run_btn.config(state="normal"))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _cancel():
+        if _proc[0]:
+            _proc[0].terminate()
+            _append("\n[Cancelled]\n")
+
+    def _clear():
+        log_box.config(state="normal")
+        log_box.delete("1.0", "end")
+        log_box.config(state="disabled")
+
+    run_btn = tk.Button(btn_row, text="Run Inference", bg=RUN_BG, fg="#ffffff",
+                        font=("Helvetica", 11, "bold"), relief="flat", bd=0,
+                        padx=20, pady=9, cursor="hand2", command=_run)
+    run_btn.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+    tk.Button(btn_row, text="Cancel", bg=CANCEL_BG, fg="#ffffff",
+              relief="flat", bd=0, padx=16, pady=9, cursor="hand2",
+              command=_cancel).grid(row=0, column=1, padx=(0, 8))
+    tk.Button(btn_row, text="Clear", bg=CLEAR_BG, fg="#ffffff",
+              relief="flat", bd=0, padx=16, pady=9, cursor="hand2",
+              command=_clear).grid(row=0, column=2)
+
+    # ── Output Log ────────────────────────────────────────────────────────────
+    _section(8, "Output Log")
+    log_box = scrolledtext.ScrolledText(frm, bg=LOG_BG, fg=LOG_FG, relief="flat",
+                                        bd=0, font=("Courier", 9),
+                                        state="disabled", height=12)
+    log_box.grid(row=9, column=0, columnspan=3, sticky="nsew", pady=(4, 0))
+    frm.rowconfigure(9, weight=1)
+
+    root.mainloop()
+
+
 def _launch_web_ui():
     """Launch app.py (Gradio web UI) as a fallback when no display is available."""
-    import subprocess
     app_path = Path(__file__).resolve().parent.parent / "app.py"
     if not app_path.exists():
         sys.exit("[ERROR] app.py not found. Cannot launch web UI.")
@@ -870,12 +1082,15 @@ def main():
                         help="Confidence threshold (default: 0.4, wordsign only)")
     args = parser.parse_args()
 
-    # No arguments supplied, or no display available → launch the web UI
+    # No arguments supplied → open the tkinter launcher GUI
     no_source = not args.webcam and not args.video
-    if no_source or not _has_display():
-        if not no_source and not args.headless:
-            # Source was given but no display — inform the user
-            print("[INFO] No display detected — switching to Gradio web UI.")
+    if no_source:
+        _launch_gui()
+        return
+
+    # No display available and not headless → fall back to Gradio web UI
+    if not _has_display() and not args.headless:
+        print("[INFO] No display detected — switching to Gradio web UI.")
         _launch_web_ui()
         return
 

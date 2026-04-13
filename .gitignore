@@ -4,4 +4,6 @@ __pycache__
 .env
 data
 logs
-models
+models/training_curves.png
+models/confusion_matrix.png
+models/training_history.npz
