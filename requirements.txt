@@ -4,3 +4,4 @@ opencv-python-headless
 mediapipe>=0.10.8
 numpy>=1.26
 pyspellchecker
+customtkinter>=5.2.0

@@ -692,7 +692,7 @@ class WordSignRecogniser:
         length_t = torch.tensor([min(avail, self._seq_len)], dtype=torch.long,
                                  device=self._device)
         # Higher threshold during warmup to suppress noisy early predictions
-        eff_thresh = 0.75 if avail < self._seq_len else self._conf_thresh
+        eff_thresh = 0.55 if avail < self._seq_len else self._conf_thresh
 
         with torch.no_grad():
             logits = self._model(seq_t, length_t)
@@ -836,10 +836,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Unified ASL Inference — fingerspell or word-sign mode",
     )
-    parser.add_argument("--mode", required=True, choices=["fingerspell", "wordsign"],
+    parser.add_argument("--ui", action="store_true",
+                        help="Force launch the graphical UI")
+    parser.add_argument("--no-ui", dest="no_ui", action="store_true",
+                        help="Force CLI mode (skip UI)")
+    parser.add_argument("--mode", choices=["fingerspell", "wordsign"],
                         help="Inference mode: 'fingerspell' for letter recognition, "
                              "'wordsign' for WLASL word-sign recognition")
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--webcam", action="store_true",
                        help="Use live webcam feed")
     group.add_argument("--video", type=str, metavar="PATH",
@@ -853,6 +857,23 @@ def main():
     parser.add_argument("--conf", type=float, default=0.4,
                         help="Confidence threshold (default: 0.4, wordsign only)")
     args = parser.parse_args()
+
+    # Launch UI when: --ui flag given, or no arguments at all
+    launch_ui = args.ui or (not args.no_ui and len(sys.argv) == 1)
+    if launch_ui:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from infer_ui import launch_ui as _launch_ui
+            _launch_ui()
+        except Exception as exc:
+            sys.exit(f"[ERROR] Cannot open UI: {exc}\nRun with --no-ui for CLI mode.")
+        return
+
+    # CLI mode — enforce required args
+    if args.mode is None:
+        parser.error("--mode is required in CLI mode")
+    if not args.webcam and not args.video:
+        parser.error("one of the arguments --webcam --video is required in CLI mode")
 
     if args.video and not os.path.isfile(args.video):
         sys.exit(f"[ERROR] Video file not found: {args.video}")
