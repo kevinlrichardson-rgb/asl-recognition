@@ -844,8 +844,9 @@ def _launch_gui():
         import tkinter as tk
         from tkinter import filedialog, scrolledtext
     except ImportError:
-        sys.exit("[ERROR] tkinter not available. Run with explicit flags:\n"
-                 "  python src/infer.py --mode fingerspell --video path/to/video.mp4")
+        print("[INFO] tkinter not available — switching to Gradio web UI.")
+        _launch_web_ui()
+        return
 
     # ── Palette ───────────────────────────────────────────────────────────────
     BG        = "#1e1e1e"
@@ -861,7 +862,12 @@ def _launch_gui():
     SEL_BG    = "#1a6fc4"
     UNSEL_BG  = "#3a3a3a"
 
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        print("[INFO] No display available — switching to Gradio web UI.")
+        _launch_web_ui()
+        return
     root.title("ASL Inference Launcher")
     root.configure(bg=BG)
     root.minsize(760, 560)
@@ -1050,13 +1056,13 @@ def _launch_gui():
 
 
 def _launch_web_ui():
-    """Launch app.py (Gradio web UI) as a fallback when no display is available."""
-    app_path = Path(__file__).resolve().parent.parent / "app.py"
-    if not app_path.exists():
-        sys.exit("[ERROR] app.py not found. Cannot launch web UI.")
-    print("[INFO] No display detected — launching Gradio web UI instead.")
+    """Launch the Gradio launcher UI as a fallback when no display is available."""
+    launcher_path = Path(__file__).resolve().parent / "gradio_launcher.py"
+    if not launcher_path.exists():
+        sys.exit("[ERROR] gradio_launcher.py not found. Cannot launch web UI.")
+    print("[INFO] No display detected — launching Gradio launcher UI instead.")
     print("[INFO] Open http://localhost:7860 in your browser.")
-    subprocess.run([sys.executable, str(app_path)], check=True)
+    subprocess.run([sys.executable, str(launcher_path)], check=True)
 
 
 def main():
