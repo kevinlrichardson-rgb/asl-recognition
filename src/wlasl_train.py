@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR  = ROOT / "data" / "wlasl_landmarks"
@@ -43,20 +43,22 @@ SEED      = 42
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
 
-class WLASLDataset(Dataset):
-    def __init__(self, sequences: np.ndarray, labels: np.ndarray,
-                 lengths: np.ndarray, augment: bool = False):
-        self.sequences = torch.from_numpy(sequences)   # (N, T, F)
-        self.labels    = torch.from_numpy(labels).long()
-        self.lengths   = torch.from_numpy(lengths).long()
-        self.augment   = augment
+class LazyLandmarkDataset(Dataset):
+    """Loads .npz files on demand instead of holding all data in RAM."""
+    def __init__(self, file_paths: list[Path], labels: list[int],
+                 augment: bool = False):
+        self.file_paths = file_paths
+        self.labels     = labels
+        self.augment    = augment
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        seq = self.sequences[idx].clone()
-        length = self.lengths[idx].item()
+        d = np.load(self.file_paths[idx])
+        seq    = torch.from_numpy(d["features"].astype(np.float32))
+        length = int(d["original_length"])
+
         if self.augment:
             T = seq.size(0)
 
@@ -72,7 +74,6 @@ class WLASLDataset(Dataset):
                 shifted = torch.zeros_like(seq)
                 shifted[new_start:new_start + length] = seq[:length]
                 seq = shifted
-                length = length  # length unchanged
 
             # 3. Frame dropout: zero out 1–2 random valid frames
             n_drop = torch.randint(0, 3, (1,)).item()
@@ -92,7 +93,7 @@ class WLASLDataset(Dataset):
             scale = 0.85 + torch.rand(1).item() * 0.30
             seq[:length] = seq[:length] * scale
 
-        return seq, self.labels[idx], torch.tensor(length)
+        return seq, torch.tensor(self.labels[idx], dtype=torch.long), torch.tensor(length)
 
 
 # ── Model ─────────────────────────────────────────────────────────────────────
@@ -148,8 +149,7 @@ class WLASLModel(nn.Module):
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 def load_dataset(data_dirs: list[Path], min_samples: int) -> tuple:
-    """Scan one or more landmark dirs, merge classes, filter by min_samples."""
-    # Count instances per gloss across all dirs
+    """Scan landmark dirs, collect file paths and labels (no bulk loading)."""
     counts: dict[str, int] = {}
     for data_dir in data_dirs:
         if not data_dir.exists():
@@ -171,24 +171,24 @@ def load_dataset(data_dirs: list[Path], min_samples: int) -> tuple:
     print(f"Classes (>={min_samples} samples): {len(classes)}")
     print(f"  Range: {classes[0]} … {classes[-1]}")
 
-    sequences, labels, lengths = [], [], []
+    file_paths: list[Path] = []
+    labels: list[int] = []
     for gloss in classes:
         for data_dir in data_dirs:
             gd = data_dir / gloss
             if not gd.exists():
                 continue
             for npz_path in sorted(gd.glob("*.npz")):
-                d = np.load(npz_path)
-                sequences.append(d["features"])
+                file_paths.append(npz_path)
                 labels.append(class_to_idx[gloss])
-                lengths.append(int(d["original_length"]))
 
-    seqs = np.stack(sequences).astype(np.float32)   # (N, T, F)
-    lbls = np.array(labels, dtype=np.int64)
-    lens = np.array(lengths, dtype=np.int64)
-    print(f"Total instances: {len(lbls)}  "
-          f"| Sequence shape: {seqs.shape}  | Feature dim: {seqs.shape[2]}")
-    return seqs, lbls, lens, np.array(classes)
+    # Read seq_len and feat_dim from first file
+    d = np.load(file_paths[0])
+    seq_len  = d["features"].shape[0]
+    feat_dim = d["features"].shape[1]
+
+    print(f"Total instances : {len(labels)}  | Seq len: {seq_len}  | Feature dim: {feat_dim}")
+    return file_paths, labels, np.array(classes), seq_len, feat_dim
 
 
 # ── Training loop ─────────────────────────────────────────────────────────────
@@ -249,19 +249,32 @@ def main():
     # ── Load data
     data_dirs = [ROOT / p.strip() if not Path(p.strip()).is_absolute()
                  else Path(p.strip()) for p in args.data_dirs.split(",")]
-    seqs, lbls, lens, classes = load_dataset(data_dirs, args.min_samples)
+    file_paths, labels, classes, seq_len, feat_dim = load_dataset(data_dirs, args.min_samples)
     num_classes = len(classes)
-    feat_dim = seqs.shape[2]
 
-    n = len(lbls)
+    # ── Split indices
+    n = len(labels)
     n_val  = max(1, int(n * VAL_FRAC))
     n_test = max(1, int(n * TEST_FRAC))
     n_train = n - n_val - n_test
 
-    rng = torch.Generator().manual_seed(SEED)
-    full_ds = WLASLDataset(seqs, lbls, lens, augment=False)
-    train_ds, val_ds, test_ds = random_split(full_ds, [n_train, n_val, n_test], generator=rng)
-    train_ds.dataset = WLASLDataset(seqs, lbls, lens, augment=True)
+    rng = np.random.RandomState(SEED)
+    indices = np.arange(n)
+    rng.shuffle(indices)
+
+    train_idx = indices[:n_train]
+    val_idx   = indices[n_train:n_train + n_val]
+    test_idx  = indices[n_train + n_val:]
+
+    train_ds = LazyLandmarkDataset(
+        [file_paths[i] for i in train_idx],
+        [labels[i] for i in train_idx], augment=True)
+    val_ds = LazyLandmarkDataset(
+        [file_paths[i] for i in val_idx],
+        [labels[i] for i in val_idx], augment=False)
+    test_ds = LazyLandmarkDataset(
+        [file_paths[i] for i in test_idx],
+        [labels[i] for i in test_idx], augment=False)
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                               num_workers=2, pin_memory=device.type == "cuda")
@@ -317,7 +330,7 @@ def main():
                 "hidden": args.hidden,
                 "num_layers": args.layers,
                 "dropout": args.dropout,
-                "seq_len": seqs.shape[1],
+                "seq_len": seq_len,
                 "val_acc": vl_acc,
             }, MODEL_OUT)
             np.save(CLASS_OUT, classes)
