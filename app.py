@@ -123,6 +123,10 @@ def _make_placeholder_image(line1: str, line2: str = "",
 
 # ── Multi-strategy hand detection (mirrors demo.py) ───────────────────────────
 
+# Cached once at startup — recreating CLAHE every frame adds ~5 ms of jitter
+_CLAHE = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+
+
 def _detect_hand_live(frame_rgb: np.ndarray, detector):
     """Try several preprocessing strategies to maximise hand detection rate."""
     mp_img = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=frame_rgb)
@@ -140,8 +144,7 @@ def _detect_hand_live(frame_rgb: np.ndarray, detector):
         return result
 
     lab = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2LAB)
-    clahe_obj = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    lab[:, :, 0] = clahe_obj.apply(lab[:, :, 0])
+    lab[:, :, 0] = _CLAHE.apply(lab[:, :, 0])
     enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
     mp_img = mp_lib.Image(image_format=mp_lib.ImageFormat.SRGB, data=enhanced)
     return detector.detect(mp_img)
@@ -375,6 +378,8 @@ with gr.Blocks(title="ASL Recognition") as demo:
         inputs=[fs_webcam, fs_state],
         outputs=[fs_output, fs_caption, fs_state],
         stream_every=0.1,
+        time_limit=None,
+        concurrency_limit=1,
     )
     fs_clear_btn.click(
         fn=clear_fingerspell,
@@ -384,4 +389,7 @@ with gr.Blocks(title="ASL Recognition") as demo:
 
 
 if __name__ == "__main__":
+    # max_size=1: drop queued frames instead of letting them pile up,
+    # which prevents the output image from blanking between burst updates
+    demo.queue(max_size=1)
     demo.launch()
