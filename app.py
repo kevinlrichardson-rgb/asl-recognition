@@ -350,7 +350,25 @@ def make_fs_state():
 
 # ── Gradio UI ──────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="ASL Recognition") as demo:
+# When the webcam is closed and re-opened, Gradio's internal recording state (I)
+# is not reset, so the Record button shows "Stop" even though nothing is streaming.
+# This JS auto-clicks any stale "Stop" button when a video element starts playing
+# (i.e., when the webcam is re-enabled), driving Gradio's he() handler to reset I.
+_WEBCAM_SYNC_JS = """
+function() {
+    document.addEventListener('play', function(e) {
+        if (e.target.tagName !== 'VIDEO') return;
+        setTimeout(function() {
+            document.querySelectorAll('[title="stop recording"]').forEach(function(icon) {
+                var btn = icon.closest('button');
+                if (btn) btn.click();
+            });
+        }, 150);
+    }, true);
+}
+"""
+
+with gr.Blocks(title="ASL Recognition", js=_WEBCAM_SYNC_JS) as demo:
     gr.Markdown("# ASL Recognition\nReal-time American Sign Language recognition using your camera.")
     gr.Markdown(
         "**Fingerspelling mode**: Show ASL letters to the camera one at a time. "
