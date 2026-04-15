@@ -748,6 +748,11 @@ with gr.Blocks(title="ASL Recognition") as demo:
                 time_limit=None,
                 concurrency_limit=1,
             )
+            fs_webcam.stop_recording(
+                fn=lambda state: (_FS_PLACEHOLDER, state),
+                inputs=[fs_state],
+                outputs=[fs_output, fs_state],
+            )
             fs_clear_btn.click(
                 fn=clear_fingerspell,
                 inputs=[fs_state],
@@ -786,6 +791,11 @@ with gr.Blocks(title="ASL Recognition") as demo:
                 stream_every=0.1,
                 time_limit=None,
                 concurrency_limit=1,
+            )
+            ws_webcam.stop_recording(
+                fn=lambda state: (_WS_PLACEHOLDER, state),
+                inputs=[ws_state],
+                outputs=[ws_output, ws_state],
             )
             ws_clear_btn.click(
                 fn=clear_wordsign,
