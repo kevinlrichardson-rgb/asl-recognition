@@ -152,7 +152,7 @@ def _detect_hand_live(frame_rgb: np.ndarray, detector):
 _CAPTION_BASE = (
     "background:#000;border-radius:10px;padding:28px 36px;"
     "min-height:180px;display:flex;flex-direction:column;"
-    "align-items:center;justify-content:center;gap:14px;"
+    "align-items:center;justify-content:center;gap:14px;width:100%;"
 )
 
 
@@ -161,7 +161,8 @@ def _fs_caption_html(current_letter: str | None, confidence: float,
     spelled     = "".join(word_buffer)
     letter_html = (current_letter or "").strip() or "&nbsp;"
     conf_html   = f"{confidence*100:.0f}%" if (current_letter or "").strip() else ""
-    sugg_html   = f"Suggestion:&nbsp;<b>{suggestion}</b>" if suggestion else "&nbsp;"
+    sugg_html   = (f'<span style="color:#fff;">Suggestion:&nbsp;</span>'
+                   f'<b style="color:#fff;">{suggestion}</b>') if suggestion else "&nbsp;"
     return (
         f'<div style="{_CAPTION_BASE}font-family:\'Courier New\',monospace;">'
         f'<div style="color:#fff;font-size:240px;font-weight:bold;line-height:1;'
