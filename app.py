@@ -164,12 +164,12 @@ def _fs_caption_html(current_letter: str | None, confidence: float,
     sugg_html   = f"Suggestion:&nbsp;<b>{suggestion}</b>" if suggestion else "&nbsp;"
     return (
         f'<div style="{_CAPTION_BASE}font-family:\'Courier New\',monospace;">'
-        f'<div style="color:#fff;font-size:80px;font-weight:bold;line-height:1;'
-        f'min-height:88px;text-align:center;">{letter_html}</div>'
+        f'<div style="color:#fff;font-size:240px;font-weight:bold;line-height:1;'
+        f'min-height:264px;text-align:center;">{letter_html}</div>'
         f'<div style="color:#888;font-size:15px;min-height:20px;">{conf_html}</div>'
         f'<div style="color:#fff;font-size:30px;letter-spacing:8px;'
         f'min-height:44px;text-align:center;">{spelled}_</div>'
-        f'<div style="color:#6af;font-size:17px;font-style:italic;">{sugg_html}</div>'
+        f'<div style="color:#fff;font-size:22px;font-style:italic;">{sugg_html}</div>'
         f'</div>'
     )
 
